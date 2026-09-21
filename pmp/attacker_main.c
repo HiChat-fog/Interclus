@@ -1,43 +1,44 @@
+/* Attacker probe (U-mode). Built -O0 to match the shipped image. */
 
 #include <stdint.h>
 
-#define MON_JIEGUO ((volatile uint32_t *)0x20004200u)
-#define MON_SHURU   ((volatile uint32_t *)0x20004080u)
-#define ATK_ZIQU     ((volatile uint32_t *)0x20008000u)   
-#define ATK_ZHENGMING   ((volatile uint32_t *)0x20008008u)   
-#define MON_FLASH   0x08002000u                          
+#include "platform.h"
 
-void gongji_zhu(void) {
-    *ATK_ZIQU = 0xBEEF5EEDu;      
-    *MON_JIEGUO = 0x77777777u;  
-    *MON_SHURU = 0x88888888u;    
+#define MON_RESULTS  ((volatile uint32_t *)(MON_BOX + 0x200u))
+#define MON_INPUT    ((volatile uint32_t *)(MON_BOX + 0x80u))
+#define MON_FLASH    MON_TEXT
+
+void attacker_main(void) {
+    *ATK_OWN = 0xBEEF5EEDu;      /* own region: grant must let it land */
+    *MON_RESULTS = 0x77777777u;  /* OOB store -> cause 7, mtval=0x20004200 */
+    *MON_INPUT = 0x88888888u;    /* OOB store -> cause 7, mtval=0x20004080 */
     {
-        volatile uint32_t v = *MON_JIEGUO;  
+        volatile uint32_t v = *MON_RESULTS;  /* OOB load -> cause 5 */
         (void)v;
     }
-
+    /* OOB fetch -> cause 1; the supervisor redirects mepc to attacker_recover */
     __asm__ volatile (
         ".option push\n.option norvc\n"
         "jalr x0, 0(%0)\n"
         ".option pop\n" :: "r" (MON_FLASH) : "memory");
-    for (;;) { __asm__ volatile ("wfi"); }   
+    for (;;) { __asm__ volatile ("wfi"); }   /* unreachable */
 }
 
-void gongji_huifu(void) {
-    *ATK_ZHENGMING = 0x5EEDC0DEu;    
-    __asm__ volatile ("ecall");  
+void attacker_recover(void) {
+    *ATK_PROOF = 0x5EEDC0DEu;    /* recovery proof */
+    __asm__ volatile ("ecall");  /* yield back */
     for (;;) { __asm__ volatile ("wfi"); }
 }
 
 asm(
     ".section .attacker.text\n"
-    ".globl gongji_rukou\n"
+    ".globl attacker_entry\n"
     ".align 2\n"
-    "gongji_rukou:\n"
+    "attacker_entry:\n"
     "  lui  sp, %hi(_atk_stack_top)\n"
     "  addi sp, sp, %lo(_atk_stack_top)\n"
-    "  lui  t0, %hi(gongji_zhu)\n"
-    "  addi t0, t0, %lo(gongji_zhu)\n"
+    "  lui  t0, %hi(attacker_main)\n"
+    "  addi t0, t0, %lo(attacker_main)\n"
     "  jalr t0\n"
     "1: wfi\n"
     "  j 1b\n"

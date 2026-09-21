@@ -1,3 +1,5 @@
+/* libgcc-style 64-bit helpers for RV32. eBPF is a 64-bit ISA, the core is
+ * not; the __muldi3-style names must stay so clang emits calls to them. */
 
 #include <stdint.h>
 
@@ -51,6 +53,7 @@ unsigned long long __muldi3(unsigned long long a, unsigned long long b) {
     return ll + ((lh + hl) << 32); 
 }
 
+/* restoring division: one bit per iteration, 64 rounds */
 static unsigned long long udivmod(unsigned long long a, unsigned long long b,
                                   unsigned long long *rem) {
     unsigned long long q = 0, r = 0;

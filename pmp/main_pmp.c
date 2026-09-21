@@ -1,64 +1,20 @@
 
 #include <stdint.h>
 #include "../ebpf/policy_mavlink.h"
+#include "platform.h"
 
-#define STATUS  ((volatile uint32_t *)0x20000100u)
-#define STK_CNT (*(volatile uint32_t *)0xE000F008u)
-#define STK_CTLR (*(volatile uint32_t *)0xE000F000u)
-
-#define MON_MODE     ((volatile uint32_t *)0x20004020u)
-#define MON_OFF      ((volatile uint32_t *)0x20004040u)
-#define MON_SIZES    ((volatile uint32_t *)0x20004060u)
-#define MON_SHURU    ((volatile uint8_t *)0x20004080u)
-#define MON_CONFN    ((volatile uint32_t *)0x20004180u)
-#define MON_PIANYI     ((volatile uint32_t *)0x20004184u)
-#define MON_CSIZES   ((volatile uint32_t *)0x20004290u)
-#define MON_CAIJUE ((volatile uint32_t *)0x20004400u)
-#define MON_INSNS    ((volatile uint32_t *)0x20004430u)
-#define MON_BAN_CAIJUE    ((volatile uint32_t *)0x20004460u)
-#define MON_CINSNS   ((volatile uint32_t *)0x20004560u)
-#define MON_NVERD    ((volatile uint32_t *)0x20004680u)
-#define MON_MAP      ((volatile uint32_t *)0x20004800u)
-#define MON_SHUJU    ((volatile uint8_t *)0x20004A00u)
-#define MAP_CELLS    64u
-#define ATK_ZIQU      ((volatile uint32_t *)0x20008000u)
-#define ATK_ZHENGMING    ((volatile uint32_t *)0x20008008u)
-
-#define YOUXIANG   ((volatile uint32_t *)0x20002000u)
 #define MO_SHU  0x5741524Du
-#define MB_DATA   ((volatile uint8_t *)(0x20002000u + 8u))
 #define MAX_SWARM 64u
+#ifdef QEMU_TARGET
+#include "../qemu/report.h"
+#endif
 
-#define MON_RAM_PMP   0x080013FFu
-#define MON_FLASH_PMP 0x02000BFFu
-#define ATK_RAM_PMP   0x080023FFu
-#define ATK_FLASH_PMP 0x020013FFu
-#define PMP_DENY      0xFFFFFFFFu
-
-#define S_CAIJUE 16u  
-#define S_INSNS   24u  
-#define S_VINTACT 32u
-#define S_IINTACT 33u
-#define S_OWNOOK  34u
-#define S_INTER   40u  
-#define S_LOG0C   41u  
-#define S_DONE    56u  
-#define S_BAN_CAIJUE   64u  
-#define S_CINSNS  72u  
-#define S_CYC0    80u  
-#define S_CYC1    81u  
-#define S_CYC2    82u  
-#define S_JINGBAO   83u  
-#define S_CHONGTU_N   84u  
-#define S_LAIYUAN     85u  
-#define S_NATOK   86u  
-#define S_RDROK   87u  
 
 extern void xianjing_rukou(void);
 extern void guanli_huifu(void);
 extern void jiankong_rukou(void);
-extern void gongji_rukou(void);
-extern void gongji_huifu(void);
+extern void attacker_entry(void);
+extern void attacker_recover(void);
 
 volatile uint32_t g_ri_xuhao = 0;
 volatile uint32_t g_ri_yuanyin[8];
@@ -113,12 +69,12 @@ void rukou(void) {
     STATUS[0] = 0xDEADBEEFu;
     STATUS[1] = 0xC0DE0008u;
     {
-        volatile char *q = (volatile char *)0x20000110u;
+        volatile char *q = STATUS_NAME;
         const char *msg = "PMP-EBPF-3";
         while (*msg) *q++ = *msg++;
         *q = 0;
     }
-    STK_CTLR |= 1u;
+    TIMER_INIT();
 
     csr_xie(0x305, (uint32_t)xianjing_rukou);
 
@@ -172,13 +128,13 @@ void rukou(void) {
     pmp_bufang(1);
     g_jieduan = 1;
     MON_MODE[0] = 0u;
-    g_stk0 = STK_CNT;
+    g_stk0 = TIMER_NOW();
     jin_yonghu((uint32_t)jiankong_rukou);
 }
 
 void guanli_huifu(void) {
     if (g_jieduan == 1) {                       
-        uint32_t cyc = STK_CNT - g_stk0;
+        uint32_t cyc = TIMER_NOW() - g_stk0;
         for (int i = 0; i < 6; i++) {
             STATUS[S_CAIJUE + i] = MON_CAIJUE[i];
             STATUS[S_INSNS + i] = MON_INSNS[i];
@@ -188,10 +144,10 @@ void guanli_huifu(void) {
         pmp_bufang(1);
         g_jieduan = 2;
         MON_MODE[0] = 1u;
-        g_stk0 = STK_CNT;
+        g_stk0 = TIMER_NOW();
         jin_yonghu((uint32_t)jiankong_rukou);
     } else if (g_jieduan == 2) {                
-        uint32_t cyc = STK_CNT - g_stk0;
+        uint32_t cyc = TIMER_NOW() - g_stk0;
         uint32_t alerts = 0;
         for (uint32_t i = 0; i < g_chongtu_n && i < 8u; i++) {
             STATUS[S_BAN_CAIJUE + i] = MON_BAN_CAIJUE[i];
@@ -208,10 +164,10 @@ void guanli_huifu(void) {
         pmp_bufang(1);
         g_jieduan = 3;
         MON_MODE[0] = 2u;
-        g_stk0 = STK_CNT;
+        g_stk0 = TIMER_NOW();
         jin_yonghu((uint32_t)jiankong_rukou);
     } else if (g_jieduan == 3) {                
-        uint32_t cyc = STK_CNT - g_stk0;
+        uint32_t cyc = TIMER_NOW() - g_stk0;
         static const uint32_t want[6] = { 1, 1, 0, 2, 3, 4 };
         uint32_t natok = 1;
         for (int i = 0; i < 6; i++) {
@@ -220,9 +176,9 @@ void guanli_huifu(void) {
         STATUS[S_CYC2] = cyc;
         STATUS[S_NATOK] = natok;
         pmp_bufang(0);
-        g_zhiding = (uint32_t)gongji_huifu;
+        g_zhiding = (uint32_t)attacker_recover;
         g_jieduan = 4;
-        jin_yonghu((uint32_t)gongji_rukou);
+        jin_yonghu((uint32_t)attacker_entry);
     } else {                                  
         static const uint32_t want[6] = { 1, 1, 0, 2, 3, 4 };
         uint32_t vok = 1, iok = (shuru_he() == g_shuru_he);
@@ -231,7 +187,7 @@ void guanli_huifu(void) {
         }
         STATUS[S_VINTACT] = vok;
         STATUS[S_IINTACT] = iok;
-        STATUS[S_OWNOOK] = (*ATK_ZIQU == 0xBEEF5EEDu);
+        STATUS[S_OWNOOK] = (*ATK_OWN == 0xBEEF5EEDu);
         STATUS[S_INTER] = g_ri_xuhao;
         STATUS[S_LOG0C] = g_ri_yuanyin[0];
         STATUS[S_LOG0C + 1] = g_ri_zhi[0];
@@ -241,9 +197,12 @@ void guanli_huifu(void) {
         STATUS[S_LOG0C + 5] = g_ri_zhi[2];
         STATUS[S_LOG0C + 6] = g_ri_yuanyin[3];
         STATUS[S_LOG0C + 7] = g_ri_zhi[3];
-        STATUS[S_RDROK] = (*ATK_ZHENGMING == 0x5EEDC0DEu);
+        STATUS[S_RDROK] = (*ATK_PROOF == 0x5EEDC0DEu);
         STATUS[S_DONE] = 0x600DF00Du;
 
+#ifdef QEMU_TARGET
+        report();                  /* UART evidence dump + exit */
+#endif
         uint32_t hb = 0;
         for (;;) {
             STATUS[3] = hb++;

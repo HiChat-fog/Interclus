@@ -64,7 +64,7 @@ static uint64_t du_xiaoduan(const uint8_t *m, uint8_t size) {
     }
 }
 
-int ebpf_yunxing(const struct ebpf_prog *p, struct ebpf_result *r) {
+int ebpf_run(const struct ebpf_prog *p, struct ebpf_result *r) {
     uint64_t regs[11] = {0};
     uint32_t steps = 0, pc = 0;
     struct ebpf_insn in;

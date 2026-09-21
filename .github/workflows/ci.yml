@@ -1,0 +1,25 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: gcc -O2 -o test_host ebpf/test_host.c ebpf/ebpf_mini.c ebpf/helpers_rv32.c
+      - run: ./test_host
+  firmware-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y clang lld gcc-riscv64-unknown-elf
+      - run: LLD=ld.lld bash build.sh
+      - run: |
+          riscv64-unknown-elf-readelf -S build/fw_pmp.elf | tee sections.txt
+          grep -q '\.monitor_text' sections.txt
+          grep -q '\.attacker_text' sections.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fw_pmp
+          path: |
+            build/fw_pmp.bin
+            build/pmp_probe.bin

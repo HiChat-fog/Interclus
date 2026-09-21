@@ -32,6 +32,6 @@ struct ebpf_result {
     uint8_t  fault;           
 };
 
-int ebpf_yunxing(const struct ebpf_prog *p, struct ebpf_result *r);
+int ebpf_run(const struct ebpf_prog *p, struct ebpf_result *r);
 
 #endif

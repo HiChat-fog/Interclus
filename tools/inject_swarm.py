@@ -84,9 +84,9 @@ def main():
     confn, src, alertn = w[S_CHONGTU_N], w[S_LAIYUAN], w[S_JINGBAO]
     got = [w.get(S_BAN_CAIJUE + 4 * i) for i in range(8)]
     ok = (confn == N) and (alertn == alerts) and (got == qiwang[:8])
-    print(f"机群 N={N} (seed={seed})  宿主镜像告警={alerts}  板上告警={alertn}")
-    print(f"板上前8裁决: {got}")
-    print(f"宿主镜像前8: {qiwang[:8]}")
+    print(f"swarm N={N} (seed={seed})  host alerts={alerts}  board alerts={alertn}")
+    print(f"board first-8 verdicts: {got}")
+    print(f"host first-8 verdicts: {qiwang[:8]}")
     print("RESULT:", "MATCH ✅" if ok else "MISMATCH ❌")
     return 0 if ok else 1
 if __name__ == "__main__":
