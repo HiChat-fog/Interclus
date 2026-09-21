@@ -4,7 +4,7 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 mkdir -p "$REPO/build"
 cd "$REPO/build"
 CC="clang --target=riscv32 -march=rv32imafc -mabi=ilp32 -mno-relax -msmall-data-limit=0 -ffreestanding -O2 -DQEMU_TARGET"
-LLD="${LLD:-ld.lld}"
+LLD="${LLD:-$HOME/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld}"
 $CC -c ../qemu/main_qemu.c -o main_qemu.o
 $CC -c ../qemu/report.c -o report.o
 $CC -c ../pmp/main_pmp.c -o main_pmp.o

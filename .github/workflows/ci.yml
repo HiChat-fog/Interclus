@@ -23,3 +23,13 @@ jobs:
           path: |
             build/fw_pmp.bin
             build/pmp_probe.bin
+  qemu-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y clang lld qemu-system-misc
+      - run: LLD=ld.lld bash qemu/build_qemu.sh
+      - run: |
+          set -o pipefail
+          timeout 30 qemu-system-riscv32 -M virt -bios none -kernel build/fw_qemu.elf -nographic | tee qemu.log
+          grep -q "== MATCH ==" qemu.log
