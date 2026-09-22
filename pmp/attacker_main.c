@@ -5,13 +5,13 @@
 #include "platform.h"
 
 #define MON_RESULTS  ((volatile uint32_t *)(MON_BOX + 0x200u))
-#define MON_INPUT    ((volatile uint32_t *)(MON_BOX + 0x80u))
+#define MON_INPUT_W  ((volatile uint32_t *)(MON_BOX + 0x80u))
 #define MON_FLASH    MON_TEXT
 
 void attacker_main(void) {
     *ATK_OWN = 0xBEEF5EEDu;      /* own region: grant must let it land */
     *MON_RESULTS = 0x77777777u;  /* OOB store -> cause 7, mtval=0x20004200 */
-    *MON_INPUT = 0x88888888u;    /* OOB store -> cause 7, mtval=0x20004080 */
+    *MON_INPUT_W = 0x88888888u;    /* OOB store -> cause 7, mtval=0x20004080 */
     {
         volatile uint32_t v = *MON_RESULTS;  /* OOB load -> cause 5 */
         (void)v;

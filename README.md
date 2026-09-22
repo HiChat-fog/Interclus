@@ -13,10 +13,14 @@ schedules the compartments, and closes a capture-forensics-recovery loop:
 every faulting access is logged with `mcause` and `mtval`, then skipped or
 redirected, and the monitor keeps running.
 
-**No hardware needed.** The whole pipeline runs under QEMU:
+**No hardware needed.** The full capacity sweep runs under QEMU:
 
     bash qemu/build_qemu.sh
     qemu-system-riscv32 -M virt -bios none -kernel build/fw_qemu.elf -nographic
+
+Eight swarm sizes (N=8..64) go through the same four-phase schedule as the
+board: eBPF filtering, grid screening, a native-C reference filter, and the
+five-step attack spectrum. Each pass prints its evidence:
 
     verdicts: 1 1 0 2 3 4
     insns:    15 12 5 12 13 15
@@ -24,6 +28,13 @@ redirected, and the monitor keeps running.
     attack:  n=4 mtval: 0x80200200 0x80200080 0x80200200 0x80100000
     integrity: verdicts=1 checksum=1 own=1 native=1 proof=1
     == MATCH ==
+
+    ...
+
+    == SWEEP 8/8 MATCH ==
+
+The alert counts across the sweep are 0, 0, 3, 4, 10, 15, 19, 26 -- the same
+numbers the board produces (see below).
 
 ## What you can learn here
 

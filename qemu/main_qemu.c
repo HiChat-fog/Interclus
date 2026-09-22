@@ -4,16 +4,45 @@
 
 #include <stdint.h>
 #include "../pmp/platform.h"
-#include "fixture.h"           /* const mailbox_init[] in section .mailbox */
+#include "fixture.h"           /* per-N fixture arrays (capacity sweep) */
 
 void uart_puts(const char *s);
-void report(void);
+void uart_putdec(uint32_t v);
+int report(void);
+extern volatile int g_report_ok;
 void rukou(void);
+void supervisor_reset(void);
+void qemu_exit(int code);
+
+volatile uint8_t mailbox_ram[8 + 42u * 64u] __attribute__((section(".mailbox")));
+static volatile unsigned sweep_t;
+static volatile unsigned sweep_fails;
+
+#define NFIX (sizeof(sweeps) / sizeof(sweeps[0]))
+
+/* entered via `j sweep_next` from the supervisor's last phase: no caller
+ * frame, never returns */
+void sweep_next(void) {
+    uart_puts("\n");
+    if (!g_report_ok) sweep_fails++;
+    sweep_t++;
+    if (sweep_t >= NFIX) {
+        uart_puts(sweep_fails ? "== SWEEP FAILED ==\n" : "== SWEEP 8/8 MATCH ==\n");
+        qemu_exit(sweep_fails ? 1 : 0);
+    }
+    for (unsigned i = 0; i < 8u + 42u * sweeps[sweep_t].n; i++)
+        mailbox_ram[i] = sweeps[sweep_t].data[i];
+    supervisor_reset();
+    rukou();
+}
 
 __attribute__((section(".text.startup")))
 void boot(void) {
-    uart_puts("== pmp-ebpf qemu ==\n");
-    rukou();                       /* four-phase schedule; report() at the end */
+    uart_puts("== pmp-ebpf qemu: capacity sweep ==\n");
+    for (unsigned i = 0; i < 8u + 42u * sweeps[0].n; i++)
+        mailbox_ram[i] = sweeps[0].data[i];
+    supervisor_reset();
+    rukou();
     for (;;) { __asm__ volatile ("wfi"); }
 }
 

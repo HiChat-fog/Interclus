@@ -8,9 +8,9 @@
 
 #include "platform.h"
 
-static void yuansheng_guolv(void) {
+static void native_filter(void) {
     for (int i = 0; i < 6; i++) {
-        const volatile uint8_t *p = MON_SHURU + MON_OFF[i];
+        const volatile uint8_t *p = MON_INPUT + MON_OFF[i];
         uint32_t v;
         if (p[0] != 0xFDu) {
             v = 0u;
@@ -25,18 +25,18 @@ static void yuansheng_guolv(void) {
                 v = (lat > 900000000u) ? 4u : 1u;
             } else v = 1u;
         }
-        MON_NVERD[i] = v;
+        MON_NATIVE_VERD[i] = v;
     }
 }
 
-void jiankong_zhu(void) {
+void monitor_main(void) {
     struct ebpf_prog prog;
     struct ebpf_result r;
     int i;
 
     switch (MON_MODE[0]) {
     case 2u:                                  
-        yuansheng_guolv();
+        native_filter();
         break;
     case 1u:                                  
         for (i = 0; i < (int)MAP_CELLS; i++) MON_MAP[i] = 0;  
@@ -48,11 +48,11 @@ void jiankong_zhu(void) {
         {
             uint32_t al = 0;
             for (i = 0; i < (int)MON_CONFN[0]; i++) {
-                prog.ctx = MON_SHUJU + MON_PIANYI[i];
-                prog.ctx_size = MON_CSIZES[i];
+                prog.ctx = MON_DATA + MON_SOFF[i];
+                prog.ctx_size = MON_SSIZES[i];
                 ebpf_run(&prog, &r);
-                MON_BAN_CAIJUE[i] = (uint32_t)r.retval;
-                MON_CINSNS[i] = r.insns_executed;
+                MON_SCREEN_VERD[i] = (uint32_t)r.retval;
+                MON_SCREEN_INSNS[i] = r.insns_executed;
                 if (r.retval == 5u) al++;
             }
             DIAG_RUNS[0]++;
@@ -66,10 +66,10 @@ void jiankong_zhu(void) {
         prog.map_cells = 0;
         prog.max_steps = 1000000u;
         for (i = 0; i < 6; i++) {
-            prog.ctx = (const uint8_t *)(MON_SHURU + MON_OFF[i]);
+            prog.ctx = (const uint8_t *)(MON_INPUT + MON_OFF[i]);
             prog.ctx_size = MON_SIZES[i];
             ebpf_run(&prog, &r);
-            MON_CAIJUE[i] = (uint32_t)r.retval;
+            MON_VERDICTS[i] = (uint32_t)r.retval;
             MON_INSNS[i] = r.insns_executed;
         }
         break;
@@ -80,13 +80,13 @@ void jiankong_zhu(void) {
 
 asm(
     ".section .monitor.text\n"
-    ".globl jiankong_rukou\n"
+    ".globl monitor_entry\n"
     ".align 2\n"
-    "jiankong_rukou:\n"
+    "monitor_entry:\n"
     "  lui  sp, %hi(_mon_stack_top)\n"
     "  addi sp, sp, %lo(_mon_stack_top)\n"
-    "  lui  t0, %hi(jiankong_zhu)\n"
-    "  addi t0, t0, %lo(jiankong_zhu)\n"
+    "  lui  t0, %hi(monitor_main)\n"
+    "  addi t0, t0, %lo(monitor_main)\n"
     "  jalr t0\n"
     "1: wfi\n"
     "  j 1b\n"

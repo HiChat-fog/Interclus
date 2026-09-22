@@ -1,3 +1,5 @@
+/* eBPF subset interpreter: 64-bit semantics on RV32, byte-exact on
+ * both x86-64 (host tests) and the board. Faults never touch memory. */
 
 #include "ebpf_mini.h"
 
@@ -51,7 +53,7 @@ static void jiema(uint64_t e, struct ebpf_insn *d) {
 
 #define MODE_MEM 0x60
 
-static uint64_t du_xiaoduan(const uint8_t *m, uint8_t size) {
+static uint64_t load_le(const uint8_t *m, uint8_t size) {
     switch (size) {
     case 1: return (uint64_t)m[0];
     case 2: return (uint64_t)m[0] | ((uint64_t)m[1] << 8);
@@ -217,7 +219,7 @@ int ebpf_run(const struct ebpf_prog *p, struct ebpf_result *r) {
                 addr - (uint64_t)(uintptr_t)p->ctx + size > p->ctx_size) {
                 r->fault = EBPF_FAULT_MEM; goto out;
             }
-            regs[in.dst] = du_xiaoduan((const uint8_t *)(uintptr_t)addr, size);
+            regs[in.dst] = load_le((const uint8_t *)(uintptr_t)addr, size);
             pc++;
         } else if (cls == CLS_ST || cls == CLS_STX) {
             (void)op;

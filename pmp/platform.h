@@ -13,7 +13,7 @@
 #define ATK_STACK  0x80209F00u
 #define STATUS      ((volatile uint32_t *)0x80010000u)
 #define STATUS_NAME ((volatile char *)0x80010110u)
-#define YOUXIANG    ((volatile uint32_t *)0x80011000u)
+#define MAILBOX    ((volatile uint32_t *)0x80011000u)
 #define MB_DATA     ((volatile uint8_t *)(0x80011000u + 8u))
 #define TIMER_INIT()  do { } while (0)
 #define TIMER_NOW()   \
@@ -30,7 +30,7 @@
 #define ATK_STACK  0x20009F00u
 #define STATUS      ((volatile uint32_t *)0x20000100u)
 #define STATUS_NAME ((volatile char *)0x20000110u)
-#define YOUXIANG    ((volatile uint32_t *)0x20002000u)
+#define MAILBOX    ((volatile uint32_t *)0x20002000u)
 #define MB_DATA     ((volatile uint8_t *)(0x20002000u + 8u))
 #define STK_CTLR (*(volatile uint32_t *)0xE000F000u)
 #define STK_CNT  (*(volatile uint32_t *)0xE000F008u)
@@ -43,19 +43,19 @@
 #define MON_MODE     ((volatile uint32_t *)(MON_BOX + 0x20u))
 #define MON_OFF      ((volatile uint32_t *)(MON_BOX + 0x40u))
 #define MON_SIZES    ((volatile uint32_t *)(MON_BOX + 0x60u))
-#define MON_SHURU    ((volatile uint8_t *)(MON_BOX + 0x80u))
+#define MON_INPUT    ((volatile uint8_t *)(MON_BOX + 0x80u))
 #define MON_CONFN    ((volatile uint32_t *)(MON_BOX + 0x180u))
-#define MON_PIANYI   ((volatile uint32_t *)(MON_BOX + 0x184u))
-#define MON_CSIZES   ((volatile uint32_t *)(MON_BOX + 0x290u))
-#define MON_CAIJUE   ((volatile uint32_t *)(MON_BOX + 0x400u))
+#define MON_SOFF   ((volatile uint32_t *)(MON_BOX + 0x184u))
+#define MON_SSIZES   ((volatile uint32_t *)(MON_BOX + 0x290u))
+#define MON_VERDICTS   ((volatile uint32_t *)(MON_BOX + 0x400u))
 #define MON_INSNS    ((volatile uint32_t *)(MON_BOX + 0x430u))
-#define MON_BAN_CAIJUE ((volatile uint32_t *)(MON_BOX + 0x460u))
-#define MON_CINSNS   ((volatile uint32_t *)(MON_BOX + 0x560u))
-#define MON_NVERD    ((volatile uint32_t *)(MON_BOX + 0x680u))
+#define MON_SCREEN_VERD ((volatile uint32_t *)(MON_BOX + 0x460u))
+#define MON_SCREEN_INSNS   ((volatile uint32_t *)(MON_BOX + 0x560u))
+#define MON_NATIVE_VERD    ((volatile uint32_t *)(MON_BOX + 0x680u))
 #define DIAG_RUNS    ((volatile uint32_t *)(MON_BOX + 0x700u))
 #define DIAG_ALRT    ((volatile uint32_t *)(MON_BOX + 0x704u))
 #define MON_MAP      ((volatile uint32_t *)(MON_BOX + 0x800u))
-#define MON_SHUJU    ((volatile uint8_t *)(MON_BOX + 0xA00u))
+#define MON_DATA    ((volatile uint8_t *)(MON_BOX + 0xA00u))
 #define MAP_CELLS    64u
 
 /* attacker-box slots */

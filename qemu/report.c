@@ -3,6 +3,8 @@
 #include <stdint.h>
 #include "../pmp/platform.h"
 
+volatile int g_report_ok;
+
 #define UART0 ((volatile uint8_t *)0x10000000u)
 
 static void putc_(char c) {
@@ -27,7 +29,7 @@ void qemu_exit(int code) {
     for (;;) { __asm__ volatile ("wfi"); }
 }
 
-void report(void) {
+int report(void) {
     static const uint32_t want[6] = { 1, 1, 0, 2, 3, 4 };
 
     uart_puts("verdicts:");
@@ -77,6 +79,7 @@ void report(void) {
     uart_puts(" proof=");
     uart_putdec(STATUS[S_RDROK]);
     uart_puts("\n");
+    g_report_ok = ok;
     uart_puts(ok ? "== MATCH ==\n" : "== MISMATCH ==\n");
-    qemu_exit(ok ? 0 : 1);
+    return ok;
 }

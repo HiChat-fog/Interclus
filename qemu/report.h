@@ -1,6 +1,6 @@
 /* report(): UART evidence dump, called by the supervisor's last phase. */
 
-void report(void);
+int report(void);
 void uart_puts(const char *s);
 void uart_puthex(uint32_t v);
 void uart_putdec(uint32_t v);

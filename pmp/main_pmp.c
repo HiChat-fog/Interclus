@@ -12,7 +12,7 @@
 
 extern void xianjing_rukou(void);
 extern void guanli_huifu(void);
-extern void jiankong_rukou(void);
+extern void monitor_entry(void);
 extern void attacker_entry(void);
 extern void attacker_recover(void);
 
@@ -57,7 +57,7 @@ static uint32_t shuru_he(void) {
     uint32_t s = 0;
     for (int i = 0; i < 6; i++) {
         uint32_t sz = MON_SIZES[i];
-        for (uint32_t j = 0; j < sz; j++) s += MON_SHURU[MON_OFF[i] + j];
+        for (uint32_t j = 0; j < sz; j++) s += MON_INPUT[MON_OFF[i] + j];
     }
     return s;
 }
@@ -88,37 +88,37 @@ void rukou(void) {
         for (int i = 0; i < 6; i++) {
             MON_OFF[i] = off;
             MON_SIZES[i] = sizes[i];
-            for (uint32_t j = 0; j < sizes[i]; j++) MON_SHURU[off + j] = bao[i][j];
+            for (uint32_t j = 0; j < sizes[i]; j++) MON_INPUT[off + j] = bao[i][j];
             off += sizes[i];
         }
     }
 
     g_chongtu_n = 0;
-    if (YOUXIANG[0] == MO_SHU && YOUXIANG[1] >= 1u && YOUXIANG[1] <= MAX_SWARM) {
-        g_chongtu_n = YOUXIANG[1];
+    if (MAILBOX[0] == MO_SHU && MAILBOX[1] >= 1u && MAILBOX[1] <= MAX_SWARM) {
+        g_chongtu_n = MAILBOX[1];
         for (uint32_t i = 0; i < g_chongtu_n; i++) {
-            MON_PIANYI[i] = i * 42u;
-            MON_CSIZES[i] = 42u;
+            MON_SOFF[i] = i * 42u;
+            MON_SSIZES[i] = 42u;
             for (uint32_t j = 0; j < 42u; j++)
-                MON_SHUJU[i * 42u + j] = MB_DATA[i * 42u + j];
+                MON_DATA[i * 42u + j] = MB_DATA[i * 42u + j];
         }
         g_laiyuan = 1;
     } else {
         g_chongtu_n = 8;
         for (uint32_t i = 0; i < 8; i++) {
-            MON_PIANYI[i] = i * 42u;
-            MON_CSIZES[i] = 42u;
+            MON_SOFF[i] = i * 42u;
+            MON_SSIZES[i] = 42u;
             for (uint32_t j = 0; j < 10u; j++)
-                MON_SHUJU[i * 42u + j] = PKT_GPI[j];
-            MON_SHUJU[i * 42u + 10u] = 0x80;
-            MON_SHUJU[i * 42u + 11u] = 0x2F;
-            MON_SHUJU[i * 42u + 12u] = 0x77;
-            MON_SHUJU[i * 42u + 13u] = 0x12;
+                MON_DATA[i * 42u + j] = PKT_GPI[j];
+            MON_DATA[i * 42u + 10u] = 0x80;
+            MON_DATA[i * 42u + 11u] = 0x2F;
+            MON_DATA[i * 42u + 12u] = 0x77;
+            MON_DATA[i * 42u + 13u] = 0x12;
             const uint8_t *lon = (i < 4) ? SWARM_LON33 : SWARM_LON34;
             for (uint32_t j = 0; j < 4u; j++)
-                MON_SHUJU[i * 42u + 14u + j] = lon[j];
+                MON_DATA[i * 42u + 14u + j] = lon[j];
             for (uint32_t j = 18u; j < 42u; j++)
-                MON_SHUJU[i * 42u + j] = PKT_GPI[j];
+                MON_DATA[i * 42u + j] = PKT_GPI[j];
         }
         g_laiyuan = 0;
     }
@@ -129,14 +129,28 @@ void rukou(void) {
     g_jieduan = 1;
     MON_MODE[0] = 0u;
     g_stk0 = TIMER_NOW();
-    jin_yonghu((uint32_t)jiankong_rukou);
+    jin_yonghu((uint32_t)monitor_entry);
 }
+
+
+#ifdef QEMU_TARGET
+void supervisor_reset(void) {
+    g_jieduan = 1;
+    g_shuru_he = 0;
+    g_stk0 = 0;
+    g_jingbao = 0;
+    g_chongtu_n = 0;
+    g_laiyuan = 0;
+    g_ri_xuhao = 0;
+    for (int i = 0; i < 8; i++) { g_ri_yuanyin[i] = 0; g_ri_zhi[i] = 0; }
+}
+#endif
 
 void guanli_huifu(void) {
     if (g_jieduan == 1) {                       
         uint32_t cyc = TIMER_NOW() - g_stk0;
         for (int i = 0; i < 6; i++) {
-            STATUS[S_CAIJUE + i] = MON_CAIJUE[i];
+            STATUS[S_CAIJUE + i] = MON_VERDICTS[i];
             STATUS[S_INSNS + i] = MON_INSNS[i];
         }
         STATUS[S_CYC0] = cyc;
@@ -145,16 +159,16 @@ void guanli_huifu(void) {
         g_jieduan = 2;
         MON_MODE[0] = 1u;
         g_stk0 = TIMER_NOW();
-        jin_yonghu((uint32_t)jiankong_rukou);
+        jin_yonghu((uint32_t)monitor_entry);
     } else if (g_jieduan == 2) {                
         uint32_t cyc = TIMER_NOW() - g_stk0;
         uint32_t alerts = 0;
         for (uint32_t i = 0; i < g_chongtu_n && i < 8u; i++) {
-            STATUS[S_BAN_CAIJUE + i] = MON_BAN_CAIJUE[i];
-            STATUS[S_CINSNS + i] = MON_CINSNS[i];
+            STATUS[S_BAN_CAIJUE + i] = MON_SCREEN_VERD[i];
+            STATUS[S_CINSNS + i] = MON_SCREEN_INSNS[i];
         }
         for (uint32_t i = 0; i < g_chongtu_n; i++) {
-            if (MON_BAN_CAIJUE[i] == 5u) alerts++;
+            if (MON_SCREEN_VERD[i] == 5u) alerts++;
         }
         g_jingbao = alerts;
         STATUS[S_CYC1] = cyc;
@@ -165,13 +179,13 @@ void guanli_huifu(void) {
         g_jieduan = 3;
         MON_MODE[0] = 2u;
         g_stk0 = TIMER_NOW();
-        jin_yonghu((uint32_t)jiankong_rukou);
+        jin_yonghu((uint32_t)monitor_entry);
     } else if (g_jieduan == 3) {                
         uint32_t cyc = TIMER_NOW() - g_stk0;
         static const uint32_t want[6] = { 1, 1, 0, 2, 3, 4 };
         uint32_t natok = 1;
         for (int i = 0; i < 6; i++) {
-            if (MON_NVERD[i] != want[i]) natok = 0;
+            if (MON_NATIVE_VERD[i] != want[i]) natok = 0;
         }
         STATUS[S_CYC2] = cyc;
         STATUS[S_NATOK] = natok;
@@ -183,7 +197,7 @@ void guanli_huifu(void) {
         static const uint32_t want[6] = { 1, 1, 0, 2, 3, 4 };
         uint32_t vok = 1, iok = (shuru_he() == g_shuru_he);
         for (int i = 0; i < 6; i++) {
-            if (MON_CAIJUE[i] != want[i] || STATUS[S_CAIJUE + i] != want[i]) vok = 0;
+            if (MON_VERDICTS[i] != want[i] || STATUS[S_CAIJUE + i] != want[i]) vok = 0;
         }
         STATUS[S_VINTACT] = vok;
         STATUS[S_IINTACT] = iok;
@@ -201,12 +215,14 @@ void guanli_huifu(void) {
         STATUS[S_DONE] = 0x600DF00Du;
 
 #ifdef QEMU_TARGET
-        report();                  /* UART evidence dump + exit */
-#endif
+        report();
+        __asm__ volatile ("j sweep_next");   /* no caller frame: jump, don't return */
+#else
         uint32_t hb = 0;
         for (;;) {
             STATUS[3] = hb++;
             for (volatile int k = 0; k < 20000; ++k) __asm__ volatile ("nop");
         }
+#endif
     }
 }
