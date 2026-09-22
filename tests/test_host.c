@@ -4,9 +4,12 @@
 
 #include <stdio.h>
 #include <string.h>
-#include "ebpf_mini.h"
-#include "policy_mavlink.h"
-#include "policy_conflict.h"
+#include "../core/ebpf.h"
+#include "../modules/policies/mavlink.h"
+#include "../modules/policies/screening.h"
+#include "../modules/examples/pass_all.c"
+#include "../core/loader.c"
+#include "../core/contract.h"
 
 static int failures = 0;
 
@@ -20,6 +23,11 @@ static void check_case(const char *name, const struct ebpf_prog *p,
            name, (unsigned long long)r.retval, r.fault, r.insns_executed,
            (unsigned long long)want_ret, want_fault, ok ? "PASS" : "FAIL");
     if (!ok) failures++;
+}
+
+static void check_desc(const char *name, ic_status got, ic_status want) {
+    printf("%-28s %s\n", name, got == want ? "PASS" : "FAIL");
+    if (got != want) failures++;
 }
 
 #define PROG_WITH(data) \
@@ -100,6 +108,36 @@ int main(void) {
         struct ebpf_prog q = { POLICY_CONFLICT, POLICY_CONFLICT_CNT,
                                PKT_GPI, sizeof(PKT_GPI), 1000000, 0, 0 };
         check_case("CALL without map blocked", &q, 0, EBPF_FAULT_CALL);
+    }
+
+    /* minimal module: pass-all policy (two checks, no core edits) */
+    {
+        struct ebpf_prog q = { pass_all_ins, pass_all_cnt,
+                               PKT_BIGLEN, sizeof(PKT_BIGLEN), 1000, 0, 0 };
+        check_case("module pass-all accepts", &q, 1, EBPF_OK);
+        q.ctx = PKT_BADMAGIC; q.ctx_size = sizeof(PKT_BADMAGIC);
+        check_case("module pass-all rejects bad magic", &q, 0, EBPF_OK);
+    }
+
+    /* loader validation gate: one valid descriptor, then the rejections */
+    {
+        ic_module_desc d = { IC_MODULE_MAGIC, IC_CONTRACT_VERSION,
+                             IC_MODULE_NATIVE, 0x08004000u, 0x2000u,
+                             0x20008000u, 0x2000u, 0, 0 };
+        check_desc("loader: valid descriptor", ic_module_check(&d), IC_OK);
+        d.magic = 0x12345678u;
+        check_desc("loader: bad magic", ic_module_check(&d), IC_ERR_CONTRACT);
+        d = (ic_module_desc){ IC_MODULE_MAGIC, 99u, IC_MODULE_NATIVE,
+                              0x08004000u, 0x2000u, 0x20008000u, 0x2000u, 0, 0 };
+        check_desc("loader: bad contract version", ic_module_check(&d), IC_ERR_CONTRACT);
+        d = (ic_module_desc){ IC_MODULE_MAGIC, IC_CONTRACT_VERSION,
+                              IC_MODULE_NATIVE, 0x08002100u, 0x2000u,
+                              0x20008000u, 0x2000u, 0, 0 };
+        check_desc("loader: unaligned text", ic_module_check(&d), IC_ERR_ARGUMENT);
+        d = (ic_module_desc){ IC_MODULE_MAGIC, IC_CONTRACT_VERSION,
+                              IC_MODULE_NATIVE, 0x08004000u, 0x2000u,
+                              0x20008000u, 0x2000u, 0x2001u, 0 };
+        check_desc("loader: entry out of bounds", ic_module_check(&d), IC_ERR_ARGUMENT);
     }
 
     printf("\n%s (%d failures)\n", failures ? "!!! FAILURES" : "ALL PASS", failures);

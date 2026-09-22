@@ -1,12 +1,12 @@
 
 #include <stdint.h>
-#include "../ebpf/ebpf_mini.h"
-#include "../ebpf/policy_mavlink.h"
-#include "../ebpf/policy_conflict.h"
-#include "../ebpf/helpers_rv32.c"
-#include "../ebpf/ebpf_mini.c"
+#include "../core/ebpf.h"
+#include "policies/mavlink.h"
+#include "policies/screening.h"
+#include "../core/helpers.c"
+#include "../core/ebpf.c"
 
-#include "platform.h"
+#include "../core/platform.h"
 
 static void native_filter(void) {
     for (int i = 0; i < 6; i++) {

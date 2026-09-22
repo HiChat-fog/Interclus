@@ -1,7 +1,7 @@
 
 #include <stdint.h>
-#include "../ebpf/policy_mavlink.h"
-#include "platform.h"
+#include "policies/mavlink.h"
+#include "../core/platform.h"
 
 #define MO_SHU  0x5741524Du
 #define MAX_SWARM 64u

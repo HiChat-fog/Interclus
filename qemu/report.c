@@ -1,7 +1,7 @@
 /* UART helpers + evidence report for the QEMU build. */
 
 #include <stdint.h>
-#include "../pmp/platform.h"
+#include "../core/platform.h"
 
 volatile int g_report_ok;
 

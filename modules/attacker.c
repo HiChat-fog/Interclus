@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#include "platform.h"
+#include "../core/platform.h"
 
 #define MON_RESULTS  ((volatile uint32_t *)(MON_BOX + 0x200u))
 #define MON_INPUT_W  ((volatile uint32_t *)(MON_BOX + 0x80u))

@@ -1,7 +1,7 @@
 /* eBPF subset interpreter: 64-bit semantics on RV32, byte-exact on
  * both x86-64 (host tests) and the board. Faults never touch memory. */
 
-#include "ebpf_mini.h"
+#include "ebpf.h"
 
 static void jiema(uint64_t e, struct ebpf_insn *d) {
     d->opcode = (uint8_t)(e & 0xff);

@@ -3,7 +3,7 @@
 #define POLICY_CONFLICT_H
 
 #include <stdint.h>
-#include "ebpf_asm.h"
+#include "../../core/ebpf_asm.h"
 
 static const uint64_t POLICY_CONFLICT[] = {
      LDXH(2, 1, 7),

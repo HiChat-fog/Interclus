@@ -3,7 +3,7 @@
 #define POLICY_MAVLINK_H
 
 #include <stdint.h>
-#include "ebpf_asm.h"
+#include "../../core/ebpf_asm.h"
 
 static const uint64_t POLICY_MAVLINK[] = {
      LDXB(2, 1, 0),                 

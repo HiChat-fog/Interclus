@@ -3,7 +3,7 @@
  *   qemu-system-riscv32 -M virt -bios none -kernel build/fw_qemu.elf -nographic */
 
 #include <stdint.h>
-#include "../pmp/platform.h"
+#include "../core/platform.h"
 #include "fixture.h"           /* per-N fixture arrays (capacity sweep) */
 
 void uart_puts(const char *s);

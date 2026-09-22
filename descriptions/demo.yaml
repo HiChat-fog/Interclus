@@ -1,0 +1,27 @@
+# Interclus demo description: the two compartments this repository ships
+# with, declared the way a module author would. Compiled by
+# tools/describe.py into core/contract.h types.
+
+contract_version: 1
+
+compartments:
+  - name: monitor
+    text_base:  0x08002000
+    text_size:  0x2000
+    sram_base:  0x20004000
+    sram_size:  0x2000
+  - name: attacker
+    text_base:  0x08004000
+    text_size:  0x2000
+    sram_base:  0x20008000
+    sram_size:  0x2000
+
+modules:
+  - name: monitor
+    kind: ebpf
+    compartment: monitor
+    entry_offset: 0
+  - name: attacker
+    kind: native
+    compartment: attacker
+    entry_offset: 0

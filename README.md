@@ -44,13 +44,14 @@ numbers the board produces (see below).
 - an eBPF subset interpreter with full 64-bit semantics on a 32-bit core
 - an adversarial probe that attacks the isolation and gets caught, with
   address-precise forensics
-- one firmware, two targets: real silicon and QEMU, via `pmp/platform.h`
+- one firmware, two targets: real silicon and QEMU, via `core/platform.h`
 
 ## Layout
 
-    ebpf/                 eBPF subset interpreter, policies, host tests
-    pmp/                  supervisor, monitor, attacker probe, trap handler, platform.h
-    qemu/                 QEMU target: boot, fixture mailbox, evidence report
+    core/                 contract.h, eBPF interpreter, helpers, trap capture, platform map
+    modules/              supervisor, monitor task, attacker probe, policies, board map
+    qemu/                 QEMU target: boot, fixture mailboxes, evidence report
+    tests/                host tests
     tools/                swarm injection + host-side mirror check
     docs/                 architecture figure
     reference/            firmware image used for recorded results
@@ -59,8 +60,7 @@ numbers the board produces (see below).
 
 ## Host tests
 
-    cd ebpf
-    gcc -fsanitize=address,undefined -I. test_host.c ebpf_mini.c helpers_rv32.c -o t
+    gcc -fsanitize=address,undefined -ffreestanding -o t tests/test_host.c core/ebpf.c core/helpers.c
     ./t
 
 19 test cases must pass. The same C99 interpreter is compiled for x86-64 and

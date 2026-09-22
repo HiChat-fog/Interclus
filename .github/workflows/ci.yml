@@ -5,7 +5,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: gcc -O2 -o test_host ebpf/test_host.c ebpf/ebpf_mini.c ebpf/helpers_rv32.c
+      - run: gcc -O2 -ffreestanding -o test_host tests/test_host.c core/ebpf.c core/helpers.c
       - run: ./test_host
   firmware-build:
     runs-on: ubuntu-latest
