@@ -214,6 +214,29 @@ int main(void) {
         check_desc("ebpf: map base without size", ic_module_check(&d), IC_ERR_ARGUMENT);
     }
 
+    /* loaded-program preflight: shape checks before the interpreter runs */
+    {
+        static uint64_t prog[] = { LDXB(2, 1, 0), MOV64I(0, 1), EXIT() };
+        check_desc("preflight: valid program", ic_program_check(prog, 3), IC_OK);
+        check_desc("preflight: null program", ic_program_check(0, 3), IC_ERR_ARGUMENT);
+        check_desc("preflight: empty program", ic_program_check(prog, 0), IC_ERR_ARGUMENT);
+        check_desc("preflight: count over cap", ic_program_check(prog, IC_PROG_MAX_INSNS + 1u), IC_ERR_ARGUMENT);
+
+        static uint64_t badjump[] = { JEQ64(0, 1, 100), MOV64I(0, 1), EXIT() };
+        check_desc("preflight: jump out of range", ic_program_check(badjump, 3), IC_ERR_VALIDATE);
+        static uint64_t badreg[] = { MOV64(12, 1), EXIT() };
+        check_desc("preflight: register out of range", ic_program_check(badreg, 2), IC_ERR_VALIDATE);
+        static uint64_t badop[] = { STW(1, 0, 5), EXIT() };
+        check_desc("preflight: store rejected", ic_program_check(badop, 2), IC_ERR_VALIDATE);
+        static uint64_t badcall[] = { MOV64I(1, 0), CALL(7), EXIT() };
+        check_desc("preflight: unknown helper", ic_program_check(badcall, 3), IC_ERR_VALIDATE);
+
+        check_desc("preflight: mavlink", ic_program_check(POLICY_MAVLINK, POLICY_MAVLINK_CNT), IC_OK);
+        check_desc("preflight: screening", ic_program_check(POLICY_CONFLICT, POLICY_CONFLICT_CNT), IC_OK);
+        check_desc("preflight: pass-all", ic_program_check(pass_all_ins, pass_all_cnt), IC_OK);
+        check_desc("preflight: rate-limit", ic_program_check(RATE_LIMIT, RATE_LIMIT_CNT), IC_OK);
+    }
+
     printf("\n%s (%d failures)\n", failures ? "!!! FAILURES" : "ALL PASS", failures);
     return failures ? 1 : 0;
 }

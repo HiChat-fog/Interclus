@@ -1,6 +1,7 @@
 
 #include <stdint.h>
 #include "../core/contract.h"
+#include "../core/loader.h"
 #include "../descriptions/demo.h"
 #include "policies/mavlink.h"
 #include "policies/screening.h"
@@ -90,6 +91,42 @@ static uint32_t boot_gate(void) {
     return 0u;
 }
 
+/* boot-time program load: external bytes in the program area pass the same
+ * gates as compiled-in modules, then land in the monitor slot. No magic
+ * means no load was attempted; a failed gate falls back to the built-in
+ * policy and records why — external input never parks the device. */
+static void load_program(void) {
+    const volatile uint32_t *area = (const volatile uint32_t *)PROG_AREA;
+    uint32_t cnt;
+    MON_PROG_CNT[0] = 0u;
+    STATUS[S_LOAD] = 0u;
+    if (area[0] != PROG_MAGIC) return;
+    cnt = area[1];
+    if (!cnt || cnt > IC_PROG_MAX_INSNS) { STATUS[S_LOAD] = 2u; return; }
+    {
+        ic_module_desc d = { IC_MODULE_MAGIC, IC_CONTRACT_VERSION,
+                             IC_MODULE_EBPF, (uint32_t)MON_PROG, cnt * 8u,
+                             0u, 0u, 0u, 0u };
+        if (ic_module_check(&d) != IC_OK) { STATUS[S_LOAD] = 3u; return; }
+    }
+    {
+        const volatile uint8_t *src = (const volatile uint8_t *)PROG_AREA + 8u;
+        volatile uint64_t *slot = MON_PROG;
+        for (uint32_t i = 0; i < cnt; i++) {
+            uint64_t v = 0;
+            for (int b = 7; b >= 0; b--)
+                v = (v << 8) | src[i * 8u + (uint32_t)b];
+            slot[i] = v;
+        }
+    }
+    if (ic_program_check((const uint64_t *)MON_PROG, cnt) != IC_OK) {
+        STATUS[S_LOAD] = 4u;
+        return;
+    }
+    MON_PROG_CNT[0] = cnt;
+    STATUS[S_LOAD] = 1u;
+}
+
 void rukou(void) {
     uint32_t gate = boot_gate();
     if (gate) {
@@ -107,6 +144,7 @@ void rukou(void) {
 #endif
     }
     STATUS[S_GATE] = 0xC0DE0000u;
+    load_program();
     STATUS[0] = 0xDEADBEEFu;
     STATUS[1] = 0xC0DE0008u;
     {

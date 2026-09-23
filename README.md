@@ -63,7 +63,7 @@ numbers the board produces (see below).
     gcc -fsanitize=address,undefined -ffreestanding -o t tests/test_host.c core/ebpf.c core/helpers.c
     ./t
 
-53 test cases must pass. The same C99 interpreter is compiled for x86-64 and
+65 test cases must pass. The same C99 interpreter is compiled for x86-64 and
 RV32; verdicts and instruction counts must agree bit-exactly.
 
 ## Run on board

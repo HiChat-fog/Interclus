@@ -33,3 +33,5 @@ jobs:
           set -o pipefail
           timeout 30 qemu-system-riscv32 -M virt -bios none -kernel build/fw_qemu.elf -nographic | tee qemu.log
           grep -q "== SWEEP 8/8 MATCH ==" qemu.log
+          timeout 30 qemu-system-riscv32 -M virt -bios none -kernel build/fw_load.elf -nographic | tee load.log
+          grep -q "== LOAD PASS ==" load.log

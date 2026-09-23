@@ -60,8 +60,13 @@ void monitor_main(void) {
         }
         break;
     default:                                  
-        prog.ins = POLICY_MAVLINK;
-        prog.insn_cnt = POLICY_MAVLINK_CNT;
+        if (MON_PROG_CNT[0]) {                
+            prog.ins = (const uint64_t *)MON_PROG;   /* boot-time loaded */
+            prog.insn_cnt = MON_PROG_CNT[0];
+        } else {
+            prog.ins = POLICY_MAVLINK;
+            prog.insn_cnt = POLICY_MAVLINK_CNT;
+        }
         prog.map = 0;
         prog.map_cells = 0;
         prog.max_steps = 1000000u;

@@ -9,9 +9,11 @@ SECTIONS {
   .text 0x80000000 : {
     KEEP(*(.text.startup))
     main_qemu.o(.text .text.*)
+    load_test.o(.text .text.*)
     main_pmp.o(.text .text.*)
     trap_pmp.o(.text .text.*)
     main_qemu.o(.rodata .rodata.*)
+    load_test.o(.rodata .rodata.*)
     main_pmp.o(.rodata .rodata.*)
     trap_pmp.o(.rodata .rodata.*)
     . = ALIGN(4);
@@ -19,6 +21,7 @@ SECTIONS {
 
   .data : {
     main_qemu.o(.data .data.*)
+    load_test.o(.data .data.*)
     main_pmp.o(.data .data.*)
     trap_pmp.o(.data .data.*)
     . = ALIGN(4);
@@ -26,6 +29,7 @@ SECTIONS {
 
   .bss : {
     main_qemu.o(.bss .bss.* COMMON)
+    load_test.o(.bss .bss.* COMMON)
     main_pmp.o(.bss .bss.* COMMON)
     trap_pmp.o(.bss .bss.* COMMON)
     . = ALIGN(4);

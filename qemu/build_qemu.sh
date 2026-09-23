@@ -14,4 +14,7 @@ $CC -c ../core/trap.S -o trap_pmp.o
 $CC -c ../core/loader.c -o loader.o
 $LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_qemu.elf \
     main_qemu.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o
-echo "build/fw_qemu.elf"
+$CC -c ../qemu/load_test.c -o load_test.o
+$LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_load.elf \
+    load_test.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o
+echo "build/fw_qemu.elf build/fw_load.elf"

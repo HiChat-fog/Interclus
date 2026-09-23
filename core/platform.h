@@ -11,6 +11,7 @@
 #define SUP_STACK  0x8000F000u
 #define MON_STACK  0x80201F00u
 #define ATK_STACK  0x80209F00u
+#define PROG_AREA  0x80020000u   /* boot-time program image, untrusted */
 #define STATUS      ((volatile uint32_t *)0x80010000u)
 #define STATUS_NAME ((volatile char *)0x80010110u)
 #define MAILBOX    ((volatile uint32_t *)0x80011000u)
@@ -28,6 +29,7 @@
 #define SUP_STACK  0x20003F00u
 #define MON_STACK  0x20005F00u
 #define ATK_STACK  0x20009F00u
+#define PROG_AREA  0x20003000u   /* boot-time program image, untrusted */
 #define STATUS      ((volatile uint32_t *)0x20000100u)
 #define STATUS_NAME ((volatile char *)0x20000110u)
 #define MAILBOX    ((volatile uint32_t *)0x20002000u)
@@ -58,6 +60,12 @@
 #define MON_DATA    ((volatile uint8_t *)(MON_BOX + 0xA00u))
 #define MAP_CELLS    64u
 
+/* loaded-program slot in monitor SRAM: count word, then up to 64 insns;
+ * 0x1800 < MON_STACK (0x1F00) so the slot never meets the stack */
+#define MON_PROG_CNT ((volatile uint32_t *)(MON_BOX + 0x15FCu))
+#define MON_PROG     ((volatile uint64_t *)(MON_BOX + 0x1600u))
+#define PROG_MAGIC   0x474F5250u   /* "PROG" */
+
 /* attacker-box slots */
 #define ATK_OWN      ((volatile uint32_t *)(ATK_BOX + 0x0u))
 #define ATK_PROOF    ((volatile uint32_t *)(ATK_BOX + 0x8u))
@@ -82,6 +90,7 @@
 #define S_NATOK   86u  
 #define S_RDROK   87u  
 #define S_GATE    88u   /* boot gate: 0xC0DE0000 clean, else 0xC0DE0000|code */
+#define S_LOAD    89u   /* program load: 0 none, 1 loaded, 2..4 failure codes */
 
 /* PMP NAPOT encodings, derived from the map */
 #define NAPOT(base, size) (((base) >> 2) | ((size) >> 3) - 1u)

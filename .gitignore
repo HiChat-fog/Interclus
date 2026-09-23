@@ -3,3 +3,4 @@ build/
 __pycache__/
 *.bin.tmp
 tools/swarm_chunk.bin
+swarm_chunk.bin
