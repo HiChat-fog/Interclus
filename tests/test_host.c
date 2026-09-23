@@ -1,6 +1,7 @@
-/* Host-side unit tests (19 cases). The same C99 interpreter is compiled for
- * x86-64 (this file) and RV32; these cases pin verdicts, fault classes, and
- * per-packet instruction counts. Expected values come from the policies. */
+/* Host-side unit tests. The same C99 interpreter is compiled for
+ * x86-64 (this file) and RV32; these cases pin verdicts, fault classes,
+ * per-packet instruction counts, and the validation gates. Expected values
+ * come from the policies. */
 
 #include <stdio.h>
 #include <string.h>
@@ -8,8 +9,10 @@
 #include "../modules/policies/mavlink.h"
 #include "../modules/policies/screening.h"
 #include "../modules/examples/pass_all.c"
+#include "../modules/examples/rate_limit.h"
 #include "../core/loader.c"
 #include "../core/contract.h"
+#include "../descriptions/demo.h"
 
 static int failures = 0;
 
@@ -119,6 +122,21 @@ int main(void) {
         check_case("module pass-all rejects bad magic", &q, 0, EBPF_OK);
     }
 
+    /* example module: rate limit, three frames per msgid class, then latch */
+    {
+        static uint32_t grid[64];
+        struct ebpf_prog q = { RATE_LIMIT, RATE_LIMIT_CNT,
+                               PKT_GPI, sizeof(PKT_GPI), 1000, grid, 64 };
+        memset(grid, 0, sizeof(grid));
+        for (int k = 0; k < 5; k++) {
+            char name[32];
+            snprintf(name, sizeof(name), "rate-limit frame%d", k);
+            check_case(name, &q, k < 3 ? 1 : 5, EBPF_OK);
+        }
+        q.ctx = PKT_HB; q.ctx_size = sizeof(PKT_HB);
+        check_case("rate-limit other class unaffected", &q, 1, EBPF_OK);
+    }
+
     /* loader validation gate: one valid descriptor, then the rejections */
     {
         ic_module_desc d = { IC_MODULE_MAGIC, IC_CONTRACT_VERSION,
@@ -138,6 +156,62 @@ int main(void) {
                               IC_MODULE_NATIVE, 0x08004000u, 0x2000u,
                               0x20008000u, 0x2000u, 0x2001u, 0 };
         check_desc("loader: entry out of bounds", ic_module_check(&d), IC_ERR_ARGUMENT);
+    }
+
+    /* compartment gate */
+    {
+        static const ic_compartment_spec good = {
+            0x08002000u, 0x2000u, 0x20004000u, 0x2000u
+        };
+        ic_compartment_spec bad;
+        check_desc("compartment: valid spec", ic_compartment_check(&good), IC_OK);
+        check_desc("compartment: null spec", ic_compartment_check(0), IC_ERR_ARGUMENT);
+        bad = good; bad.text_base = 0x08002100u;
+        check_desc("compartment: unaligned text", ic_compartment_check(&bad), IC_ERR_ARGUMENT);
+        bad = good; bad.sram_size = 0x1800u;
+        check_desc("compartment: size not power of two", ic_compartment_check(&bad), IC_ERR_ARGUMENT);
+        bad = good; bad.text_size = 0x200u;
+        check_desc("compartment: size under 1 KiB", ic_compartment_check(&bad), IC_ERR_ARGUMENT);
+    }
+
+    /* everything the repo ships must pass its own gate */
+    {
+        check_desc("gate: shipped mavlink desc", ic_module_check(&ic_module_mavlink), IC_OK);
+        check_desc("gate: shipped screening desc", ic_module_check(&ic_module_screening), IC_OK);
+        check_desc("gate: shipped rate-limit desc", ic_module_check(&ic_module_rate_limit), IC_OK);
+        check_desc("gate: shipped pass-all desc", ic_module_check(&ic_module_pass_all), IC_OK);
+        check_desc("gate: generated monitor spec", ic_compartment_check(&ic_comp_monitor), IC_OK);
+        check_desc("gate: generated attacker spec", ic_compartment_check(&ic_comp_attacker), IC_OK);
+        check_desc("gate: generated monitor desc", ic_module_check(&ic_module_monitor), IC_OK);
+        check_desc("gate: generated attacker desc", ic_module_check(&ic_module_attacker), IC_OK);
+    }
+
+    /* eBPF descriptors follow interpreter rules, not compartment rules */
+    {
+        ic_module_desc d = { IC_MODULE_MAGIC, IC_CONTRACT_VERSION,
+                             IC_MODULE_EBPF, 0x08004000u, 224u,
+                             0u, 0u, 0u, 0 };
+        check_desc("ebpf: valid descriptor", ic_module_check(&d), IC_OK);
+        d.text_base = 0u;
+        check_desc("ebpf: zero base is host-assigned", ic_module_check(&d), IC_OK);
+        d.text_base = 0x08004004u;
+        check_desc("ebpf: base not 8-byte aligned", ic_module_check(&d), IC_ERR_ARGUMENT);
+        d = (ic_module_desc){ IC_MODULE_MAGIC, IC_CONTRACT_VERSION,
+                              IC_MODULE_EBPF, 0x08004000u, 100u,
+                              0u, 0u, 0u, 0 };
+        check_desc("ebpf: size not instruction multiple", ic_module_check(&d), IC_ERR_ARGUMENT);
+        d = (ic_module_desc){ IC_MODULE_MAGIC, IC_CONTRACT_VERSION,
+                              IC_MODULE_EBPF, 0x08004000u, 224u,
+                              0u, 0u, 4u, 0 };
+        check_desc("ebpf: entry not instruction aligned", ic_module_check(&d), IC_ERR_ARGUMENT);
+        d.entry_offset = 224u;
+        check_desc("ebpf: entry past the program", ic_module_check(&d), IC_ERR_ARGUMENT);
+        d = (ic_module_desc){ IC_MODULE_MAGIC, IC_CONTRACT_VERSION,
+                              IC_MODULE_EBPF, 0x08004000u, 224u,
+                              0x20004002u, 256u, 0u, 0 };
+        check_desc("ebpf: map not word aligned", ic_module_check(&d), IC_ERR_ARGUMENT);
+        d.sram_base = 0x20004000u; d.sram_size = 0u;
+        check_desc("ebpf: map base without size", ic_module_check(&d), IC_ERR_ARGUMENT);
     }
 
     printf("\n%s (%d failures)\n", failures ? "!!! FAILURES" : "ALL PASS", failures);

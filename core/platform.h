@@ -81,6 +81,7 @@
 #define S_LAIYUAN     85u  
 #define S_NATOK   86u  
 #define S_RDROK   87u  
+#define S_GATE    88u   /* boot gate: 0xC0DE0000 clean, else 0xC0DE0000|code */
 
 /* PMP NAPOT encodings, derived from the map */
 #define NAPOT(base, size) (((base) >> 2) | ((size) >> 3) - 1u)

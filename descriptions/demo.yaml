@@ -1,6 +1,9 @@
 # Interclus demo description: the two compartments this repository ships
 # with, declared the way a module author would. Compiled by
-# tools/describe.py into core/contract.h types.
+# tools/describe.py into core/contract.h types. The supervisor checks these
+# declarations against the map it actually programs, so the YAML and the
+# firmware cannot drift apart silently. `qemu:` overrides the base addresses
+# for the riscv32 virt target; sizes are shared.
 
 contract_version: 1
 
@@ -10,11 +13,17 @@ compartments:
     text_size:  0x2000
     sram_base:  0x20004000
     sram_size:  0x2000
+    qemu:
+      text_base: 0x80100000
+      sram_base: 0x80200000
   - name: attacker
     text_base:  0x08004000
     text_size:  0x2000
     sram_base:  0x20008000
     sram_size:  0x2000
+    qemu:
+      text_base: 0x80102000
+      sram_base: 0x80208000
 
 modules:
   - name: monitor

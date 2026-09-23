@@ -1,6 +1,9 @@
 
 #include <stdint.h>
+#include "../core/contract.h"
+#include "../descriptions/demo.h"
 #include "policies/mavlink.h"
+#include "policies/screening.h"
 #include "../core/platform.h"
 
 #define MO_SHU  0x5741524Du
@@ -65,7 +68,45 @@ static uint32_t shuru_he(void) {
 static const uint8_t SWARM_LON33[4] = { 0x60, 0x2E, 0x36, 0x07 };
 static const uint8_t SWARM_LON34[4] = { 0xC2, 0xBC, 0xEB, 0x00 };
 
+/* boot gate: shipped descriptions must be well-formed and must match the
+ * map the PMP is about to get. Run before any phase, fail closed. */
+static uint32_t spec_match(const ic_compartment_spec *a,
+                           const ic_compartment_spec *b) {
+    return a->text_base == b->text_base && a->text_size == b->text_size &&
+           a->sram_base == b->sram_base && a->sram_size == b->sram_size;
+}
+
+static uint32_t boot_gate(void) {
+    const ic_compartment_spec mon = { MON_TEXT, 8192u, MON_BOX, 8192u };
+    const ic_compartment_spec atk = { ATK_TEXT, 8192u, ATK_BOX, 8192u };
+    if (ic_compartment_check(&ic_comp_monitor) != IC_OK) return 1u;
+    if (ic_compartment_check(&ic_comp_attacker) != IC_OK) return 2u;
+    if (ic_module_check(&ic_module_monitor) != IC_OK) return 3u;
+    if (ic_module_check(&ic_module_attacker) != IC_OK) return 4u;
+    if (ic_module_check(&ic_module_mavlink) != IC_OK) return 5u;
+    if (ic_module_check(&ic_module_screening) != IC_OK) return 6u;
+    if (!spec_match(&ic_comp_monitor, &mon)) return 7u;
+    if (!spec_match(&ic_comp_attacker, &atk)) return 8u;
+    return 0u;
+}
+
 void rukou(void) {
+    uint32_t gate = boot_gate();
+    if (gate) {
+        STATUS[S_GATE] = 0xC0DE0000u | gate;
+#ifdef QEMU_TARGET
+        uart_puts("== GATE FAIL ");
+        uart_putdec(gate);
+        uart_puts(" ==\n");
+        for (;;) qemu_exit(1);
+#else
+        for (;;) {
+            STATUS[3]++;
+            for (volatile int k = 0; k < 20000; ++k) __asm__ volatile ("nop");
+        }
+#endif
+    }
+    STATUS[S_GATE] = 0xC0DE0000u;
     STATUS[0] = 0xDEADBEEFu;
     STATUS[1] = 0xC0DE0008u;
     {

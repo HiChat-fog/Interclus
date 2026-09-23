@@ -4,6 +4,7 @@
 
 #include <stdint.h>
 #include "../../core/ebpf_asm.h"
+#include "../../core/contract.h"
 
 static const uint64_t POLICY_MAVLINK[] = {
      LDXB(2, 1, 0),                 
@@ -36,6 +37,14 @@ static const uint64_t POLICY_MAVLINK[] = {
      EXIT(),                        
 };
 #define POLICY_MAVLINK_CNT 28
+
+/* module self-description; the loader gate runs it before first use.
+ * text_base stays zero: the linked address is not the author's to declare */
+static const ic_module_desc ic_module_mavlink __attribute__((unused)) = {
+    IC_MODULE_MAGIC, IC_CONTRACT_VERSION, IC_MODULE_EBPF,
+    0u, (uint32_t)sizeof(POLICY_MAVLINK),
+    0u, 0u, 0u, 0u
+};
 
 static const uint8_t PKT_GPI[42] = {
     0xFD, 30, 0, 0, 1, 2, 3,
