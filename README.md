@@ -3,6 +3,8 @@
 [![ci](https://github.com/HiChat-fog/Interclus/actions/workflows/ci.yml/badge.svg)](https://github.com/HiChat-fog/Interclus/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+English | [简体中文](README.zh-CN.md)
+
 *An eBPF interpreter enclosed by RISC-V PMP.*
 
 ![architecture](docs/architecture.png)
@@ -45,6 +47,8 @@ numbers the board produces (see below).
 - an adversarial probe that attacks the isolation and gets caught, with
   address-precise forensics
 - one firmware, two targets: real silicon and QEMU, via `core/platform.h`
+- boot-time program loading: external bytecode passes a preflight gate and
+  replaces the compiled-in policy (see below)
 
 ## Layout
 
@@ -52,7 +56,7 @@ numbers the board produces (see below).
     modules/              supervisor, monitor task, attacker probe, policies, board map
     qemu/                 QEMU target: boot, fixture mailboxes, evidence report
     tests/                host tests
-    tools/                swarm injection + host-side mirror check
+    tools/                swarm injection, program loader, host-side mirror check
     docs/                 architecture figure
     reference/            firmware image used for recorded results
     build.sh              board firmware
@@ -79,6 +83,20 @@ Hardware: CH32V307VCT6 board + WCH-LinkE debugger.
 
 Try other sizes (8 to 64, the full mailbox capacity) and seeds.
 
+## Load a program at boot
+
+At boot the supervisor checks a program area for a `PROG` header followed by
+raw bytecode. The bytes pass the descriptor gate and a static preflight
+before they land in the monitor's slot; anything rejected falls back to the
+built-in policy, with the reason recorded in STATUS.
+
+    python3 tools/load_prog.py          # board, WCH-LinkE attached: verdicts flip
+    python3 tools/load_prog.py --bad    # oversized count: fallback, reason code
+    qemu-system-riscv32 -M virt -bios none -kernel build/fw_load.elf -nographic
+
+The QEMU variant runs the same load path end to end and prints
+`== LOAD PASS ==`.
+
 ## PMP semantics probe
 
 A dedicated probe firmware measures the core's PMP behavior and dumps raw
@@ -93,7 +111,7 @@ The last stage ends hung by design (misaligned-`mtvec` trap test); reflash
 ## Roadmap
 
 - UART data path to replace the debugger mailbox
-- more example policies
+- native module loading: time-multiplexed PMP compartments
 - support for other PMP-capable RISC-V MCUs
 
 ## Toolchain
