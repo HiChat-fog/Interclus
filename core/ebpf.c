@@ -80,6 +80,10 @@ int ebpf_run(const struct ebpf_prog *p, struct ebpf_result *r) {
         if (++steps > p->max_steps) { r->fault = EBPF_FAULT_STEPS; break; }
         jiema(p->ins[pc], &in);
         r->insns_executed++;
+        if (in.dst > 10u || in.src > 10u) {
+            /* register fields are four bits; r11..r15 do not exist */
+            r->fault = EBPF_FAULT_OPCODE; break;
+        }
         cls = in.opcode & 0x07;
         op  = in.opcode & 0xf0;
 

@@ -75,6 +75,12 @@ int main(void) {
     }
 
     {
+        static const uint64_t ins[] = { MOV64(12, 1), EXIT() };
+        struct ebpf_prog q = { ins, 2, PKT_HB, sizeof(PKT_HB), 1000, 0, 0 };
+        check_case("interpreter: bad register refused", &q, 0, EBPF_FAULT_OPCODE);
+    }
+
+    {
         static const uint64_t ins[] = {
             MOV64I(2, 1), SLL64I(2, 40),
             MOV64I(3, 1), SLL64I(3, 40),
