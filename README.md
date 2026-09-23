@@ -1,6 +1,6 @@
 # Interclus
 
-[![ci](https://github.com/HiChat-fog/pmp-ebpf-demo/actions/workflows/ci.yml/badge.svg)](https://github.com/HiChat-fog/pmp-ebpf-demo/actions/workflows/ci.yml)
+[![ci](https://github.com/HiChat-fog/Interclus/actions/workflows/ci.yml/badge.svg)](https://github.com/HiChat-fog/Interclus/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 *An eBPF interpreter enclosed by RISC-V PMP.*
@@ -63,7 +63,7 @@ numbers the board produces (see below).
     gcc -fsanitize=address,undefined -ffreestanding -o t tests/test_host.c core/ebpf.c core/helpers.c
     ./t
 
-19 test cases must pass. The same C99 interpreter is compiled for x86-64 and
+53 test cases must pass. The same C99 interpreter is compiled for x86-64 and
 RV32; verdicts and instruction counts must agree bit-exactly.
 
 ## Run on board
