@@ -1,29 +1,29 @@
 import struct, subprocess, time, re, sys, random
 W = "wlink"
-YOUXIANG = 0x20002000
-MO_SHU = 0x5741524D
-S_BAN_CAIJUE = 0x20000200
-S_CHONGTU_N = 0x20000250
-S_LAIYUAN   = 0x20000254
-S_JINGBAO = 0x2000024C
+MAILBOX = 0x20002000
+MAILBOX_MAGIC = 0x5741524D
+S_SCREEN = 0x20000200
+S_COUNT = 0x20000250
+S_SOURCE = 0x20000254
+S_ALERTS = 0x2000024C
 def wlink(*args, timeout=60):
     return subprocess.run([W, *args], capture_output=True, text=True, timeout=timeout)
-def zuo_gpi(lat, lon, seq):
+def make_gpi(lat, lon, seq):
     hdr = bytes([0xFD, 30, 0, 0, seq & 0xFF, 2, 3, 0x21, 0, 0])
     payload = struct.pack("<7iH", lat, lon, 50000, 100, 0, 0, 0, 0xFFFF)
     return hdr + payload + b"\xAB\xCD"
-def gezi_hao(lat, lon):
+def grid_cell(lat, lon):
     return ((lat >> 26) & 7) * 8 + ((lon >> 26) & 7)
-def jingxiang(gezi):
+def mirror(cells):
     m = [0] * 64
     out = []
-    for c in gezi:
+    for c in cells:
         m[c] += 1
         left = m[(c - 1) & 63]
         right = m[(c + 1) & 63]
         out.append(5 if (m[c] > 3 or left > 3 or right > 3) else 1)
     return out
-def du_zi(addr, n):
+def read_words(addr, n):
     out = wlink("dump", hex(addr), str(n * 4), "-q").stdout
     out = re.sub(r"\x1b\[[0-9;]*m", "", out)
     words = {}
@@ -40,53 +40,53 @@ def main():
     seed = int(sys.argv[sys.argv.index("--seed") + 1]) if "--seed" in sys.argv else 7
     N = min(N, 64)
     rng = random.Random(seed)
-    rezhu = [(20, 20), (60, 70), (80, 30)]
-    wurenji = []
+    hotspots = [(20, 20), (60, 70), (80, 30)]
+    drones = []
     for i in range(N):
         if i < N * 2 // 3:
-            hx, hy = rezhu[i % 3]
+            hx, hy = hotspots[i % 3]
             x = min(99, max(0, hx + rng.randint(-3, 3)))
             y = min(99, max(0, hy + rng.randint(-3, 3)))
         else:
             x, y = rng.randint(0, 99), rng.randint(0, 99)
-        wurenji.append((x, y))
-    bao, gezi = [], []
-    for i, (x, y) in enumerate(wurenji):
+        drones.append((x, y))
+    pkts, cells = [], []
+    for i, (x, y) in enumerate(drones):
         lat, lon = x * 10_000_000, y * 10_000_000
-        bao.append(zuo_gpi(lat, lon, i))
-        gezi.append(gezi_hao(lat, lon))
-    qiwang = jingxiang(gezi)
-    alerts = sum(1 for e in qiwang if e == 5)
-    kuai = struct.pack("<II", MO_SHU, N) + b"".join(bao)
+        pkts.append(make_gpi(lat, lon, i))
+        cells.append(grid_cell(lat, lon))
+    expected = mirror(cells)
+    alerts = sum(1 for e in expected if e == 5)
+    blob = struct.pack("<II", MAILBOX_MAGIC, N) + b"".join(pkts)
     CHUNK = 2048
-    for i in range(0, len(kuai), CHUNK):
-        chunk = kuai[i:i + CHUNK]
+    for i in range(0, len(blob), CHUNK):
+        chunk = blob[i:i + CHUNK]
         open("swarm_chunk.bin", "wb").write(chunk)
-        wlink("flash", "-a", hex(YOUXIANG + i), "swarm_chunk.bin")
+        wlink("flash", "-a", hex(MAILBOX + i), "swarm_chunk.bin")
     for round_ in range(3):
-        cur = du_zi(YOUXIANG, (len(kuai) + 3) // 4)
-        bad = [(YOUXIANG + k * 4, v) for k, v in enumerate(cur)
-               if k * 4 + 4 <= len(kuai) and v != struct.unpack_from("<I", kuai, k * 4)[0]]
-        tail = len(kuai) - (len(kuai) // 4) * 4
+        cur = read_words(MAILBOX, (len(blob) + 3) // 4)
+        bad = [(MAILBOX + k * 4, v) for k, v in enumerate(cur)
+               if k * 4 + 4 <= len(blob) and v != struct.unpack_from("<I", blob, k * 4)[0]]
+        tail = len(blob) - (len(blob) // 4) * 4
         if bad:
             for addr, _ in bad:
-                off = addr - YOUXIANG
+                off = addr - MAILBOX
                 wlink("write-mem", hex(addr),
-                      hex(struct.unpack_from("<I", kuai, off)[0]))
+                      hex(struct.unpack_from("<I", blob, off)[0]))
             wlink("reset")
             time.sleep(1)
         else:
             break
     wlink("reset")
     time.sleep(2)
-    w = du_zi(S_BAN_CAIJUE, 8)
-    w.update(du_zi(0x20000240, 6))
-    confn, src, alertn = w[S_CHONGTU_N], w[S_LAIYUAN], w[S_JINGBAO]
-    got = [w.get(S_BAN_CAIJUE + 4 * i) for i in range(8)]
-    ok = (confn == N) and (alertn == alerts) and (got == qiwang[:8])
+    w = read_words(S_SCREEN, 8)
+    w.update(read_words(0x20000240, 6))
+    confn, src, alertn = w[S_COUNT], w[S_SOURCE], w[S_ALERTS]
+    got = [w.get(S_SCREEN + 4 * i) for i in range(8)]
+    ok = (confn == N) and (alertn == alerts) and (got == expected[:8])
     print(f"swarm N={N} (seed={seed})  host alerts={alerts}  board alerts={alertn}")
     print(f"board first-8 verdicts: {got}")
-    print(f"host first-8 verdicts: {qiwang[:8]}")
+    print(f"host first-8 verdicts: {expected[:8]}")
     print("RESULT:", "MATCH ✅" if ok else "MISMATCH ❌")
     return 0 if ok else 1
 if __name__ == "__main__":
