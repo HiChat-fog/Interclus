@@ -5,7 +5,7 @@
 
 English | [简体中文](README.zh-CN.md)
 
-*An eBPF interpreter enclosed by RISC-V PMP.*
+> *An eBPF interpreter enclosed by RISC-V PMP.*
 
 ![architecture](docs/architecture.png)
 
@@ -15,84 +15,107 @@ schedules the compartments, and closes a capture-forensics-recovery loop:
 every faulting access is logged with `mcause` and `mtval`, then skipped or
 redirected, and the monitor keeps running.
 
-**No hardware needed.** The full capacity sweep runs under QEMU:
+## Quick start (no hardware)
 
-    bash qemu/build_qemu.sh
-    qemu-system-riscv32 -M virt -bios none -kernel build/fw_qemu.elf -nographic
+The full capacity sweep runs under QEMU:
+
+```bash
+bash qemu/build_qemu.sh
+qemu-system-riscv32 -M virt -bios none -kernel build/fw_qemu.elf -nographic
+```
 
 Eight swarm sizes (N=8..64) go through the same four-phase schedule as the
 board: eBPF filtering, grid screening, a native-C reference filter, and the
 five-step attack spectrum. Each pass prints its evidence:
 
-    verdicts: 1 1 0 2 3 4
-    insns:    15 12 5 12 13 15
-    alerts:  board=4 mirror=4
-    attack:  n=4 mtval: 0x80200200 0x80200080 0x80200200 0x80100000
-    integrity: verdicts=1 checksum=1 own=1 native=1 proof=1
-    == MATCH ==
+```text
+verdicts: 1 1 0 2 3 4
+insns:    15 12 5 12 13 15
+alerts:  board=4 mirror=4
+attack:  n=4 mtval: 0x80200200 0x80200080 0x80200200 0x80100000
+integrity: verdicts=1 checksum=1 own=1 native=1 proof=1
+== MATCH ==
 
-    ...
+...
 
-    == SWEEP 8/8 MATCH ==
+== SWEEP 8/8 MATCH ==
+```
 
-The alert counts across the sweep are 0, 0, 3, 4, 10, 15, 19, 26 -- the same
-numbers the board produces (see below).
+The alert counts across the sweep are 0, 0, 3, 4, 10, 15, 19, 26, and the
+board reproduces them exactly.
 
 ## What you can learn here
 
-- PMP compartmentalization on a real MCU: NAPOT regions, a deny-all filler
-  entry, and measured vendor quirks (four usable entries, unmatched-allow,
-  misaligned `mtvec` breaks trap delivery)
-- an eBPF subset interpreter with full 64-bit semantics on a 32-bit core
-- an adversarial probe that attacks the isolation and gets caught, with
-  address-precise forensics
-- one firmware, two targets: real silicon and QEMU, via `core/platform.h`
-- boot-time program loading: external bytecode passes a preflight gate and
-  replaces the compiled-in policy (see below)
+| Topic | What it shows |
+| --- | --- |
+| PMP on a real MCU | NAPOT regions, a deny-all filler entry, measured vendor quirks: four usable entries, unmatched-allow, misaligned `mtvec` breaks trap delivery |
+| 64-bit eBPF on a 32-bit core | a subset interpreter in portable C99, bit-exact on x86-64 and RV32 |
+| Adversarial probe | attacks the isolation, gets caught, forensics precise to the address |
+| One firmware, two targets | real silicon and QEMU from one source, via `core/platform.h` |
+| Boot-time loading | external bytecode passes the gates, replaces the compiled-in policy |
 
 ## Layout
 
-    core/                 contract.h, eBPF interpreter, helpers, trap capture, platform map
-    modules/              supervisor, monitor task, attacker probe, policies, board map
-    qemu/                 QEMU target: boot, fixture mailboxes, evidence report
-    tests/                host tests
-    tools/                swarm injection, program loader, host-side mirror check
-    docs/                 architecture figure
-    reference/            firmware image used for recorded results
-    build.sh              board firmware
-    qemu/build_qemu.sh    QEMU firmware
+```text
+core/                 contract.h, eBPF interpreter, helpers, trap capture, platform map
+modules/              supervisor, monitor, attacker probe, policies
+descriptions/         YAML compartment descriptions, generated C
+qemu/                 QEMU target: boot, fixture mailboxes, evidence report
+tests/                host tests
+tools/                swarm injection, program loader, host mirror check
+docs/                 architecture figure
+reference/            firmware image used for recorded results
+build.sh              board firmware
+qemu/build_qemu.sh    QEMU firmware
+```
 
-## Host tests
+## Verification
 
-    gcc -fsanitize=address,undefined -ffreestanding -o t tests/test_host.c core/ebpf.c core/helpers.c
-    ./t
+Three gates guard one codebase: the interpreter, the supervisor, and the
+monitor are the same C99 sources everywhere.
 
-66 test cases must pass. The same C99 interpreter is compiled for x86-64 and
-RV32; verdicts and instruction counts must agree bit-exactly.
+| Gate | Where | What it proves |
+| --- | --- | --- |
+| host tests | 66 cases on x86-64 | verdicts and instruction counts are bit-exact |
+| QEMU pipeline | full four-phase schedule, green in CI | every recorded experiment reproduces without hardware |
+| board | CH32V307 + WCH-LinkE | the recorded numbers come from real silicon |
 
-## Run on board
+### Host tests
+
+```bash
+gcc -fsanitize=address,undefined -ffreestanding -o t tests/test_host.c core/ebpf.c core/helpers.c
+./t
+```
+
+### On the board
 
 Hardware: CH32V307VCT6 board + WCH-LinkE debugger.
 
-    ./build.sh                            # -> build/fw_pmp.bin
-    wlink flash -e build/fw_pmp.bin
-    python3 tools/inject_swarm.py 32 --seed 7
+```bash
+./build.sh                            # -> build/fw_pmp.bin
+wlink flash -e build/fw_pmp.bin
+python3 tools/inject_swarm.py 32 --seed 7
+```
 
-    swarm N=32 (seed=7)  host alerts=4  board alerts=4
-    RESULT: MATCH ✅
+```text
+swarm N=32 (seed=7)  host alerts=4  board alerts=4
+RESULT: MATCH ✅
+```
 
-Try other sizes (8 to 64, the full mailbox capacity) and seeds.
+Sizes from 8 to 64 (the full mailbox capacity) and other seeds all work.
 
-## Load a program at boot
+### Load a program at boot
 
 At boot the supervisor checks a program area for a `PROG` header followed by
 raw bytecode. The bytes pass the descriptor gate and a static preflight
 before they land in the monitor's slot; anything rejected falls back to the
 built-in policy, with the reason recorded in STATUS.
 
-    python3 tools/load_prog.py          # board, WCH-LinkE attached: verdicts flip
-    python3 tools/load_prog.py --bad    # oversized count: fallback, reason code
-    qemu-system-riscv32 -M virt -bios none -kernel build/fw_load.elf -nographic
+```bash
+python3 tools/load_prog.py          # board, WCH-LinkE attached: verdicts flip
+python3 tools/load_prog.py --bad    # oversized count: fallback, reason code
+qemu-system-riscv32 -M virt -bios none -kernel build/fw_load.elf -nographic
+```
 
 The QEMU variant runs the same load path end to end and prints
 `== LOAD PASS ==`.
@@ -102,17 +125,19 @@ The QEMU variant runs the same load path end to end and prints
 A dedicated probe firmware measures the core's PMP behavior and dumps raw
 evidence to SRAM:
 
-    wlink flash -e build/pmp_probe.bin
-    wlink dump 0x20000100 400     # CSR read-backs, fault log, U-mode markers
+```bash
+wlink flash -e build/pmp_probe.bin
+wlink dump 0x20000100 400     # CSR read-backs, fault log, U-mode markers
+```
 
 The last stage ends hung by design (misaligned-`mtvec` trap test); reflash
 `build/fw_pmp.bin` afterwards.
 
 ## Roadmap
 
-- UART data path to replace the debugger mailbox
-- native module loading: time-multiplexed PMP compartments
-- support for other PMP-capable RISC-V MCUs
+- [ ] UART data path to replace the debugger mailbox
+- [ ] Native module loading: time-multiplexed PMP compartments
+- [ ] Support for other PMP-capable RISC-V MCUs
 
 ## Toolchain
 
@@ -121,7 +146,7 @@ The last stage ends hung by design (misaligned-`mtvec` trap test); reflash
 | host tests | gcc (or clang) |
 | board firmware | clang with riscv32 target, `lld` or rust-lld, `riscv64-unknown-elf-objcopy`, `wlink` |
 | QEMU firmware | clang with riscv32 target, `lld` or rust-lld, `qemu-system-riscv32` |
-| swarm tool | python3 |
+| injection / loader tools | python3 |
 
 ## License
 
