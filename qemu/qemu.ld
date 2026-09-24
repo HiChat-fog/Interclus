@@ -54,6 +54,8 @@ SECTIONS {
   .attacker_ram 0x80208000 (NOLOAD) : {
     attacker.o(.data .data.* .bss .bss.* .sbss .sdata)
   } > RAM
+
+  .trap_scratch 0x80010F00 (NOLOAD) : { KEEP(*(.trap_scratch)) } > RAM
 }
 
 _sup_stack_top = 0x8000F000;

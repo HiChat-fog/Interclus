@@ -7,6 +7,9 @@ xianjing_rukou:
     li   t1, 8
     beq  t0, t1, .Lecall
 
+    /* the interrupted sp belongs to U-mode: swap in the M-mode scratch
+     * stack before storing anything */
+    csrrw sp, mscratch, sp
     addi sp, sp, -48
     sw   a0, 0(sp)
     sw   a1, 4(sp)
@@ -73,6 +76,7 @@ xianjing_rukou:
     lw   t5, 28(sp)
     lw   t6, 32(sp)
     addi sp, sp, 48
+    csrrw sp, mscratch, sp      /* back to the interrupted sp */
     mret
 
 .Lecall:
@@ -86,3 +90,11 @@ xianjing_rukou:
     or   t1, t1, t2
     csrw mstatus, t1
     mret
+
+    .section .trap_scratch, "aw", @nobits
+    .p2align 3
+    .globl trap_sp0_top
+trap_sp0:
+    .space 64                   /* fault-path scratch; pinned by the linker
+                                   scripts, U-mode never sees it */
+trap_sp0_top:

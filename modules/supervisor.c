@@ -19,6 +19,7 @@ extern void guanli_huifu(void);
 extern void monitor_entry(void);
 extern void attacker_entry(void);
 extern void attacker_recover(void);
+extern char trap_sp0_top[];       /* M-mode fault scratch stack, from trap.S */
 
 volatile uint32_t g_ri_xuhao = 0;
 volatile uint32_t g_ri_yuanyin[8];
@@ -145,6 +146,7 @@ void rukou(void) {
     }
     STATUS[S_GATE] = 0xC0DE0000u;
     load_program();
+    csr_xie(0x340, (uint32_t)trap_sp0_top);   /* mscratch: fault scratch */
     STATUS[0] = 0xDEADBEEFu;
     STATUS[1] = 0xC0DE0008u;
     {

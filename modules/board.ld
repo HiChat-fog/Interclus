@@ -40,6 +40,9 @@ SECTIONS {
     attacker.o(.data .data.* .bss .bss.* .sbss .sdata)
     . = ALIGN(4);
   }
+  .trap_scratch 0x20000F00 (NOLOAD) : {
+    KEEP(*(.trap_scratch))
+  }
   _stack_top     = 0x20003F00;  
   _sup_stack_top = 0x20003F00;  
   _mon_stack_top = 0x20005F00;  

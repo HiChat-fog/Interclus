@@ -17,6 +17,12 @@ jobs:
           riscv64-unknown-elf-readelf -S build/fw_pmp.elf | tee sections.txt
           grep -q '\.monitor_text' sections.txt
           grep -q '\.attacker_text' sections.txt
+      - name: no RAM symbols inside the STATUS window
+        run: |
+          if riscv64-unknown-elf-nm build/fw_pmp.elf | awk '$1 >= "20000100" && $1 < "20000270"' | grep -q .; then
+            riscv64-unknown-elf-nm -n build/fw_pmp.elf | grep 20000
+            exit 1
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: fw_pmp
