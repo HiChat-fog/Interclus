@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y clang lld qemu-system-misc
+      - run: sudo apt-get update && sudo apt-get install -y clang lld qemu-system-misc gcc-riscv64-unknown-elf
       - run: LLD=ld.lld bash qemu/build_qemu.sh
       - run: |
           set -o pipefail
