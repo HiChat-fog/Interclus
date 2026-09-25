@@ -1,7 +1,9 @@
 
 #include <stdint.h>
 #include "../core/contract.h"
+#include "../core/compartment.h"
 #include "../core/loader.h"
+#include "../core/uart.h"
 #include "../descriptions/demo.h"
 #include "policies/mavlink.h"
 #include "policies/screening.h"
@@ -36,28 +38,6 @@ static void csr_xie(unsigned csr, uint32_t v) {
     __asm__ volatile ("csrw %0, %1" :: "n" (csr), "r" (v) : "memory");
 }
 
-static void pmp_bufang(int monitor) {
-    uint32_t a0 = monitor ? MON_RAM_PMP : ATK_RAM_PMP;
-    uint32_t a1 = monitor ? MON_FLASH_PMP : ATK_FLASH_PMP;
-    uint32_t cfgw = 0x1Bu | (0x1Du << 8) | (0x00u << 16) | (0x18u << 24);
-    csr_xie(0x3a0, 0u);
-    csr_xie(0x3b0, a0);
-    csr_xie(0x3b1, a1);
-    csr_xie(0x3b2, 0u);
-    csr_xie(0x3b3, PMP_DENY);
-    csr_xie(0x3a0, cfgw);
-}
-
-static void jin_yonghu(uint32_t pc) {
-    uint32_t ms;
-    __asm__ volatile ("csrr %0, mstatus" : "=r" (ms));
-    ms &= ~(3u << 11);
-    ms &= ~(1u << 17);
-    __asm__ volatile ("csrw mstatus, %0" :: "r" (ms) : "memory");
-    csr_xie(0x341, pc);
-    __asm__ volatile ("mret");
-}
-
 static uint32_t shuru_he(void) {
     uint32_t s = 0;
     for (int i = 0; i < 6; i++) {
@@ -89,6 +69,12 @@ static uint32_t boot_gate(void) {
     if (ic_module_check(&ic_module_screening) != IC_OK) return 6u;
     if (!spec_match(&ic_comp_monitor, &mon)) return 7u;
     if (!spec_match(&ic_comp_attacker, &atk)) return 8u;
+    if (ic_compartment_check(&ic_comp_native) != IC_OK) return 9u;
+    if (ic_module_check(&ic_module_nativedemo) != IC_OK) return 10u;
+    {
+        const ic_compartment_spec nat = { NAT_TEXT, 0x1000u, NAT_SRAM, 0x1000u };
+        if (!spec_match(&ic_comp_native, &nat)) return 11u;
+    }
     return 0u;
 }
 
@@ -128,6 +114,16 @@ static void load_program(void) {
     STATUS[S_LOAD] = 1u;
 }
 
+/* a console frame, if one arrives during the boot window, stages the
+ * program image and only then commits it to PROG_AREA; a bad frame never
+ * touches what is already there. The gates stay in load_program. */
+static void uart_load(void) {
+    uint8_t *stage = (uint8_t *)PROG_AREA + 0x400u;
+    uint32_t n = uart_recv(stage, UART_FRAME_MAX);
+    volatile uint8_t *dst = (volatile uint8_t *)PROG_AREA;
+    for (uint32_t i = 0; i < n; i++) dst[i] = stage[i];
+}
+
 void rukou(void) {
     uint32_t gate = boot_gate();
     if (gate) {
@@ -145,7 +141,6 @@ void rukou(void) {
 #endif
     }
     STATUS[S_GATE] = 0xC0DE0000u;
-    load_program();
     csr_xie(0x340, (uint32_t)trap_sp0_top);   /* mscratch: fault scratch */
     STATUS[0] = 0xDEADBEEFu;
     STATUS[1] = 0xC0DE0008u;
@@ -156,6 +151,34 @@ void rukou(void) {
         *q = 0;
     }
     TIMER_INIT();
+    uart_init();
+    uart_puts("interclus\n");
+    {
+        /* TX timing self-test: 64 bytes on the wire, paced by the
+         * peripheral at the programmed baud; STK measures the truth */
+        uint32_t t0 = TIMER_NOW();
+        for (int i = 0; i < 64; i++) uart_putc('U');
+        STATUS[S_UTX] = TIMER_NOW() - t0;
+    }
+#ifndef QEMU_TARGET
+    {
+        /* loopback proof: needs PA9 wired to PA10, else times out to 0 */
+        uint32_t t0 = TIMER_NOW();
+        uint32_t ok = 1;
+        for (int i = 0; i < 64 && ok; i++) {
+            int c;
+            for (;;) {
+                c = uart_getc();
+                if (c >= 0) break;
+                if (TIMER_NOW() - t0 > 400000u) { ok = 0; break; }
+            }
+            if (ok && c != 'U') ok = 0;
+        }
+        STATUS[S_URX] = ok;
+    }
+#endif
+    uart_load();
+    load_program();
 
     csr_xie(0x305, (uint32_t)xianjing_rukou);
 
@@ -206,11 +229,21 @@ void rukou(void) {
     MON_CONFN[0] = g_chongtu_n;
     for (uint32_t c = 0; c < MAP_CELLS; c++) MON_MAP[c] = 0;
 
-    pmp_bufang(1);
+    compartment_set(0u, &ic_comp_monitor, (uint32_t)monitor_entry - MON_TEXT);
+    compartment_set(1u, &ic_comp_attacker, (uint32_t)attacker_entry - ATK_TEXT);
+    compartment_set(2u, &ic_comp_native, 0u);
+    {
+        extern const uint8_t _binary_native_demo_bin_start[];
+        extern const uint8_t _binary_native_demo_bin_end[];
+        const uint8_t *src = _binary_native_demo_bin_start;
+        volatile uint8_t *dst = (volatile uint8_t *)NAT_TEXT;
+        while (src < _binary_native_demo_bin_end) *dst++ = *src++;
+    }
+    compartment_arm(0u);
     g_jieduan = 1;
     MON_MODE[0] = 0u;
     g_stk0 = TIMER_NOW();
-    jin_yonghu((uint32_t)monitor_entry);
+    compartment_enter(0u);
 }
 
 
@@ -236,11 +269,11 @@ void guanli_huifu(void) {
         }
         STATUS[S_CYC0] = cyc;
         g_shuru_he = shuru_he();
-        pmp_bufang(1);
+        compartment_arm(0u);
         g_jieduan = 2;
         MON_MODE[0] = 1u;
         g_stk0 = TIMER_NOW();
-        jin_yonghu((uint32_t)monitor_entry);
+        compartment_enter(0u);
     } else if (g_jieduan == 2) {                
         uint32_t cyc = TIMER_NOW() - g_stk0;
         uint32_t alerts = 0;
@@ -256,11 +289,11 @@ void guanli_huifu(void) {
         STATUS[S_JINGBAO] = g_jingbao;
         STATUS[S_CHONGTU_N] = g_chongtu_n;
         STATUS[S_LAIYUAN] = g_laiyuan;
-        pmp_bufang(1);
+        compartment_arm(0u);
         g_jieduan = 3;
         MON_MODE[0] = 2u;
         g_stk0 = TIMER_NOW();
-        jin_yonghu((uint32_t)monitor_entry);
+        compartment_enter(0u);
     } else if (g_jieduan == 3) {                
         uint32_t cyc = TIMER_NOW() - g_stk0;
         static const uint32_t want[6] = { 1, 1, 0, 2, 3, 4 };
@@ -270,11 +303,11 @@ void guanli_huifu(void) {
         }
         STATUS[S_CYC2] = cyc;
         STATUS[S_NATOK] = natok;
-        pmp_bufang(0);
+        compartment_arm(1u);
         g_zhiding = (uint32_t)attacker_recover;
         g_jieduan = 4;
-        jin_yonghu((uint32_t)attacker_entry);
-    } else {                                  
+        compartment_enter(1u);
+    } else if (g_jieduan == 4) {             /* attacker done: collect, then native */
         static const uint32_t want[6] = { 1, 1, 0, 2, 3, 4 };
         uint32_t vok = 1, iok = (shuru_he() == g_shuru_he);
         for (int i = 0; i < 6; i++) {
@@ -284,21 +317,28 @@ void guanli_huifu(void) {
         STATUS[S_IINTACT] = iok;
         STATUS[S_OWNOOK] = (*ATK_OWN == 0xBEEF5EEDu);
         STATUS[S_INTER] = g_ri_xuhao;
-        STATUS[S_LOG0C] = g_ri_yuanyin[0];
-        STATUS[S_LOG0C + 1] = g_ri_zhi[0];
-        STATUS[S_LOG0C + 2] = g_ri_yuanyin[1];
-        STATUS[S_LOG0C + 3] = g_ri_zhi[1];
-        STATUS[S_LOG0C + 4] = g_ri_yuanyin[2];
-        STATUS[S_LOG0C + 5] = g_ri_zhi[2];
-        STATUS[S_LOG0C + 6] = g_ri_yuanyin[3];
-        STATUS[S_LOG0C + 7] = g_ri_zhi[3];
+        for (int i = 0; i < 5; i++) {
+            STATUS[S_LOG0C + i * 2] = g_ri_yuanyin[i];
+            STATUS[S_LOG0C + 1 + i * 2] = g_ri_zhi[i];
+        }
         STATUS[S_RDROK] = (*ATK_PROOF == 0x5EEDC0DEu);
+        STATUS[S_NAT2] = 0u;
+        g_jieduan = 5;
+        compartment_enter(2u);
+    } else {                                 /* native done: proof + report */
+        STATUS[S_NAT2] = *(volatile uint32_t *)NAT_SRAM;
         STATUS[S_DONE] = 0x600DF00Du;
 
 #ifdef QEMU_TARGET
         report();
         __asm__ volatile ("j sweep_next");   /* no caller frame: jump, don't return */
 #else
+        uart_puts("\nverdicts:");
+        for (int i = 0; i < 6; i++) {
+            uart_puts(" ");
+            uart_putdec(STATUS[S_CAIJUE + i]);
+        }
+        uart_puts("\n");
         uint32_t hb = 0;
         for (;;) {
             STATUS[3] = hb++;

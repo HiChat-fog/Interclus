@@ -24,6 +24,14 @@ compartments:
     qemu:
       text_base: 0x80102000
       sram_base: 0x80208000
+  - name: native
+    text_base:  0x2000A000
+    text_size:  0x1000
+    sram_base:  0x2000B000
+    sram_size:  0x1000
+    qemu:
+      text_base: 0x80210000
+      sram_base: 0x80211000
 
 modules:
   - name: monitor
@@ -33,4 +41,8 @@ modules:
   - name: attacker
     kind: native
     compartment: attacker
+    entry_offset: 0
+  - name: nativedemo
+    kind: native
+    compartment: native
     entry_offset: 0

@@ -30,8 +30,8 @@ native C 参考过滤器，以及五步攻击谱。每一档都打印证据：
 verdicts: 1 1 0 2 3 4
 insns:    15 12 5 12 13 15
 alerts:  board=4 mirror=4
-attack:  n=4 mtval: 0x80200200 0x80200080 0x80200200 0x80100000
-integrity: verdicts=1 checksum=1 own=1 native=1 proof=1
+attack:  n=5 mtval: 0x80200200 0x80200080 0x80200200 0x80100000 0x80100000
+integrity: verdicts=1 checksum=1 own=1 native=1 proof=1 sv=1
 == MATCH ==
 
 ...
@@ -47,7 +47,7 @@ integrity: verdicts=1 checksum=1 own=1 native=1 proof=1
 | --- | --- |
 | 真实 MCU 上的 PMP | NAPOT 区域、deny-all 补位项、实测到的厂商怪癖：四个可用表项、unmatched-allow、错位 `mtvec` 破坏 trap 递送 |
 | 32 位核上的 64 位 eBPF | 可移植 C99 写的子集解释器，x86-64 与 RV32 逐位一致 |
-| 对抗性探针 | 对隔离发起攻击、被当场捕获，取证精确到地址 |
+| 对抗性探针 | 对隔离发起攻击（包括伪造栈指针瞄准 trap 处理器的一击）、被当场捕获，取证精确到地址 |
 | 一份固件，两个目标 | 真实硅片与 QEMU 共用一份源码，经 `core/platform.h` 切换 |
 | 启动时装载 | 外部字节码过门后替换编译期策略 |
 
@@ -113,6 +113,12 @@ qemu-system-riscv32 -M virt -bios none -kernel build/fw_load.elf -nographic
 ```
 
 QEMU 那条跑的是同一条装载路径，收尾打印 `== LOAD PASS ==`。
+
+同样的装载也能走控制台：开机窗口内推进来一帧（同步字、类型、长度、
+载荷、校验和），载荷落进程序区，面对的还是同样的两道门。被破坏的帧
+在进门前就被丢弃，内置策略照常运行。
+
+    python3 tools/uart_frame.py | qemu-system-riscv32 -M virt -bios none -kernel build/fw_urx.elf -display none -serial stdio -monitor none
 
 ## PMP 语义探针
 

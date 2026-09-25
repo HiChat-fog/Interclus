@@ -5,6 +5,8 @@
 #ifdef QEMU_TARGET
 
 #define MON_TEXT   0x80100000u
+#define NAT_TEXT   0x80210000u   /* native compartment slot (RAM, exec) */
+#define NAT_SRAM   0x80211000u
 #define ATK_TEXT   0x80102000u
 #define MON_BOX    0x80200000u
 #define ATK_BOX    0x80208000u
@@ -23,6 +25,8 @@
 #else
 
 #define MON_TEXT   0x08002000u
+#define NAT_TEXT   0x2000A000u   /* native compartment slot (RAM, exec) */
+#define NAT_SRAM   0x2000B000u
 #define ATK_TEXT   0x08004000u
 #define MON_BOX    0x20004000u
 #define ATK_BOX    0x20008000u
@@ -91,6 +95,9 @@
 #define S_RDROK   87u  
 #define S_GATE    88u   /* boot gate: 0xC0DE0000 clean, else 0xC0DE0000|code */
 #define S_LOAD    89u   /* program load: 0 none, 1 loaded, 2..4 failure codes */
+#define S_UTX     90u   /* UART TX self-test: STK ticks for 64 bytes */
+#define S_URX     91u   /* UART loopback: 1 matched, 0 no/failed */
+#define S_NAT2    92u   /* native compartment proof word */
 
 /* PMP NAPOT encodings, derived from the map */
 #define NAPOT(base, size) (((base) >> 2) | ((size) >> 3) - 1u)

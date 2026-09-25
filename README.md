@@ -32,8 +32,8 @@ five-step attack spectrum. Each pass prints its evidence:
 verdicts: 1 1 0 2 3 4
 insns:    15 12 5 12 13 15
 alerts:  board=4 mirror=4
-attack:  n=4 mtval: 0x80200200 0x80200080 0x80200200 0x80100000
-integrity: verdicts=1 checksum=1 own=1 native=1 proof=1
+attack:  n=5 mtval: 0x80200200 0x80200080 0x80200200 0x80100000 0x80100000
+integrity: verdicts=1 checksum=1 own=1 native=1 proof=1 sv=1
 == MATCH ==
 
 ...
@@ -50,7 +50,7 @@ board reproduces them exactly.
 | --- | --- |
 | PMP on a real MCU | NAPOT regions, a deny-all filler entry, measured vendor quirks: four usable entries, unmatched-allow, misaligned `mtvec` breaks trap delivery |
 | 64-bit eBPF on a 32-bit core | a subset interpreter in portable C99, bit-exact on x86-64 and RV32 |
-| Adversarial probe | attacks the isolation, gets caught, forensics precise to the address |
+| Adversarial probe | attacks the isolation, including a forged-stack-pointer try at the trap handler, gets caught, forensics precise to the address |
 | One firmware, two targets | real silicon and QEMU from one source, via `core/platform.h` |
 | Boot-time loading | external bytecode passes the gates, replaces the compiled-in policy |
 
@@ -119,6 +119,13 @@ qemu-system-riscv32 -M virt -bios none -kernel build/fw_load.elf -nographic
 
 The QEMU variant runs the same load path end to end and prints
 `== LOAD PASS ==`.
+
+The same load also works over the console: a frame (sync, type, length,
+payload, checksum) pushed during the boot window lands in the program
+area and faces the same gates. A corrupted frame is dropped before the
+gates ever see it.
+
+    python3 tools/uart_frame.py | qemu-system-riscv32 -M virt -bios none -kernel build/fw_urx.elf -display none -serial stdio -monitor none
 
 ## PMP semantics probe
 

@@ -21,6 +21,7 @@ SECTIONS {
     KEEP(attacker.o(.rodata .rodata.*))
     . = ALIGN(4);
   } > FLASH
+  .native_blob : { KEEP(*(.native_blob)) } > FLASH
   .data : {
     *(EXCLUDE_FILE(monitor.o attacker.o) .data .data.*)
     . = ALIGN(4);
@@ -42,6 +43,12 @@ SECTIONS {
   }
   .trap_scratch 0x20000F00 (NOLOAD) : {
     KEEP(*(.trap_scratch))
+  }
+  .comp_state 0x20000F40 (NOLOAD) : {
+    __comp_start = .;
+    KEEP(*(.comp_state))
+    . = ALIGN(4);
+    __comp_end = .;
   }
   _stack_top     = 0x20003F00;  
   _sup_stack_top = 0x20003F00;  

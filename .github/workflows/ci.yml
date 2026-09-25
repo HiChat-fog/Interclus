@@ -19,7 +19,7 @@ jobs:
           grep -q '\.attacker_text' sections.txt
       - name: no RAM symbols inside the STATUS window
         run: |
-          if riscv64-unknown-elf-nm build/fw_pmp.elf | awk '$1 >= "20000100" && $1 < "20000270"' | grep -q .; then
+          if riscv64-unknown-elf-nm build/fw_pmp.elf | awk '$1 >= "20000100" && $1 < "20000280"' | grep -q .; then
             riscv64-unknown-elf-nm -n build/fw_pmp.elf | grep 20000
             exit 1
           fi
@@ -41,3 +41,7 @@ jobs:
           grep -q "== SWEEP 8/8 MATCH ==" qemu.log
           timeout 30 qemu-system-riscv32 -M virt -bios none -kernel build/fw_load.elf -nographic | tee load.log
           grep -q "== LOAD PASS ==" load.log
+          python3 tools/uart_frame.py | timeout 30 qemu-system-riscv32 -M virt -bios none -kernel build/fw_urx.elf -display none -serial stdio -monitor none | tee urx.log
+          grep -q "== LOAD PASS ==" urx.log
+          python3 tools/uart_frame.py --corrupt | timeout 30 qemu-system-riscv32 -M virt -bios none -kernel build/fw_urx.elf -display none -serial stdio -monitor none | tee urx_bad.log || true
+          grep -q "== LOAD FAIL ==" urx_bad.log

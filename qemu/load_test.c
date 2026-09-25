@@ -2,7 +2,9 @@
  * replace the built-in mavlink policy for the six built-in packets.
  * Run with:
  *   qemu-system-riscv32 -M virt -bios none -kernel build/fw_load.elf -nographic
- * PASS line: == LOAD PASS == */
+ * PASS line: == LOAD PASS ==
+ * Built with -DPROG_FROM_UART (fw_urx.elf), the program arrives on the
+ * console instead: tools/uart_frame.py feeds the frame via stdin. */
 
 #include <stdint.h>
 #include "../core/platform.h"
@@ -27,12 +29,14 @@ void sweep_next(void) {
 
 __attribute__((section(".text.startup")))
 void boot(void) {
+#ifndef PROG_FROM_UART
     volatile uint32_t *area = (volatile uint32_t *)PROG_AREA;
     volatile uint64_t *ins = (volatile uint64_t *)(PROG_AREA + 8u);
     area[0] = PROG_MAGIC;
     area[1] = pass_all_cnt;
     for (unsigned i = 0; i < pass_all_cnt; i++)
         ins[i] = pass_all_ins[i];
+#endif
     supervisor_reset();
     rukou();
     for (;;) { __asm__ volatile ("wfi"); }
