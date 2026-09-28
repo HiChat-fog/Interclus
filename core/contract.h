@@ -66,7 +66,9 @@ ic_status ic_compartment_free(ic_compartment c);
 ic_status ic_compartment_check(const ic_compartment_spec *spec);
 
 /* Arms PMP for c and enters its U-mode entry point. Returns to M-mode when
- * the compartment yields (ecall) or faults (trap -> forensics -> here). */
+ * the compartment yields (ecall); a fault evicts it — the trap path logs
+ * forensics, wipes the register file, and the supervisor resumes without
+ * that compartment (v1.1; v1 skipped the faulting instruction instead). */
 ic_status ic_compartment_enter(ic_compartment c, uint32_t entry_offset);
 
 /* ---- 2. programs: eBPF execution inside a compartment ---- */
@@ -133,8 +135,11 @@ typedef struct {
 ic_status ic_module_check(const ic_module_desc *d);
 
 /* ---- lifecycle ----
- * v1 covers: alloc / enter / yield-by-ecall / fault-recover. pause, resume,
- * unload, and child-task loading append in later contract versions, designed
- * against the same rules. Native and eBPF modules share this one lifecycle. */
+ * v1 covers: alloc / enter / yield-by-ecall / fault-recover. v1.1 replaces
+ * fault-recover with fault-evict: a compartment's first fault ends its
+ * lifetime (frame kept as evidence, no collateral to other compartments).
+ * pause, resume, unload, and child-task loading append in later contract
+ * versions, designed against the same rules. Native and eBPF modules
+ * share this one lifecycle. */
 
 #endif /* INTERCLUS_CONTRACT_H */

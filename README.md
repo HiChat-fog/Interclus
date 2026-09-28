@@ -11,9 +11,10 @@ English | [简体中文](README.zh-CN.md)
 
 An eBPF interpreter running unprivileged inside RISC-V PMP compartments on a
 CH32V307 (RV32IMAFC, no MMU). A machine-mode supervisor arms the boundaries,
-schedules the compartments, and closes a capture-forensics-recovery loop:
-every faulting access is logged with `mcause` and `mtval`, then skipped or
-redirected, and the monitor keeps running.
+schedules the compartments, and closes a capture-forensics-eviction loop:
+a compartment's first faulting access is logged with `mcause` and `mtval`,
+its register frame is parked in its TCB as evidence, and the compartment is
+evicted — the schedule continues without it (Tock-style, no collateral).
 
 ## Quick start (no hardware)
 

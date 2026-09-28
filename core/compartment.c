@@ -1,6 +1,9 @@
 /* compartment.c: time-multiplexed PMP compartments. One NAPOT pair
  * (entry0 = SRAM, entry1 = text) is re-armed per switch; entry3 stays the
- * static deny-all filler. Re-arming the same compartment is skipped. */
+ * static deny-all filler. Re-arming the same compartment is skipped.
+ * A faulting compartment is evicted: the trap path saves its frame into
+ * the TCB and wipes the register file, the supervisor marks it dead here,
+ * and the schedule moves on without it (Tock-style, no collateral). */
 
 #include <stdint.h>
 #include "compartment.h"
@@ -12,6 +15,7 @@ struct compartment {
     ic_compartment_spec spec;
     uint32_t entry;
     uint32_t armed;
+    uint32_t evicted;
     uint32_t tcb[32];
 };
 
@@ -30,6 +34,9 @@ void compartment_set(unsigned i, const ic_compartment_spec *spec,
     if (i >= COMP_COUNT) return;
     comps[i].spec = *spec;
     comps[i].entry = entry;
+    comps[i].armed = 0u;        /* instantiation invalidates prior arming */
+    comps[i].evicted = 0u;
+    for (unsigned j = 0; j < 32u; j++) comps[i].tcb[j] = 0u;
 }
 
 void compartment_arm(unsigned i) {
@@ -45,14 +52,30 @@ void compartment_arm(unsigned i) {
     comps[i].armed = 1u;
 }
 
+/* Terminate the running lifetime: keep the TCB frame the trap path saved
+ * (it is the evidence), mark the slot dead, and drop every armed bit —
+ * nothing about this compartment may look live afterwards. */
+void compartment_evict(unsigned i) {
+    if (i >= COMP_COUNT) return;
+    comps[i].evicted = 1u;
+    comps[i].armed = 0u;
+}
+
+unsigned compartment_evicted(unsigned i) {
+    return (i < COMP_COUNT) ? comps[i].evicted : 1u;
+}
+
 /* Enter compartment i: restore its TCB into the register file (zeros on
  * first entry — the register-cleanup convention), arm its PMP pair, and
  * mret into text_base+entry. Never returns; the caller's C state is
- * abandoned exactly as it was with the previous enter. */
+ * abandoned exactly as it was with the previous enter. Entering an
+ * evicted compartment parks the core: the supervisor must not do it. */
 __attribute__((noreturn))
 void compartment_enter(unsigned i) {
+    while (comps[i].evicted) { __asm__ volatile ("wfi"); }
     compartment_arm(i);
     cur_comp = i;
+    cur_tcb = (uint32_t)&comps[i].tcb;
     register uint32_t tcb asm("t0") = (uint32_t)&comps[i].tcb;
     register uint32_t target asm("a1") =
         comps[i].spec.text_base + comps[i].entry;

@@ -18,21 +18,27 @@
 
 extern void xianjing_rukou(void);
 extern void guanli_huifu(void);
+extern void guanli_fault(uint32_t yuanyin, uint32_t zhi);
 extern void monitor_entry(void);
 extern void attacker_entry(void);
-extern void attacker_recover(void);
+extern void attacker_v1(void);
+extern void attacker_v2(void);
+extern void attacker_v3(void);
+extern void attacker_v4(void);
+extern void attacker_v5(void);
+extern void attacker_v6(void);
 extern char trap_sp0_top[];       /* M-mode fault scratch stack, from trap.S */
 
 volatile uint32_t g_ri_xuhao = 0;
 volatile uint32_t g_ri_yuanyin[8];
 volatile uint32_t g_ri_zhi[8];
-volatile uint32_t g_zhiding = 0;   
 static volatile uint32_t g_jieduan = 1;
 static volatile uint32_t g_shuru_he = 0;
 static volatile uint32_t g_stk0 = 0;
 static volatile uint32_t g_jingbao = 0;
 static volatile uint32_t g_chongtu_n = 0;
 static volatile uint32_t g_laiyuan = 0;
+static volatile uint32_t g_atk_vec = 0;   /* attacker lifetime in flight */
 
 static void csr_xie(unsigned csr, uint32_t v) {
     __asm__ volatile ("csrw %0, %1" :: "n" (csr), "r" (v) : "memory");
@@ -255,10 +261,91 @@ void supervisor_reset(void) {
     g_jingbao = 0;
     g_chongtu_n = 0;
     g_laiyuan = 0;
+    g_atk_vec = 0;
     g_ri_xuhao = 0;
     for (int i = 0; i < 8; i++) { g_ri_yuanyin[i] = 0; g_ri_zhi[i] = 0; }
 }
 #endif
+
+/* attacker lifetimes (contract v1.1): one vector per compartment, either
+ * it yields (ecall) or its first fault evicts it; the schedule advances
+ * either way and the evidence lands in the forensics ring unchanged. */
+static void (*const atk_vec[7])(void) = {
+    attacker_entry, attacker_v1, attacker_v2, attacker_v3,
+    attacker_v4, attacker_v5, attacker_v6
+};
+
+static void atk_schedule(unsigned v) {
+    compartment_set(1u, &ic_comp_attacker,
+                    (uint32_t)atk_vec[v] - ATK_TEXT);   /* fresh lifetime */
+    compartment_arm(1u);
+    compartment_enter(1u);
+}
+
+static void atk_advance(void) {
+    uint32_t v = g_atk_vec;
+    if (v == 0u) STATUS[S_OWNOOK] = (*ATK_OWN == 0xBEEF5EEDu);
+    if (v == 6u) STATUS[S_RDROK] = (*ATK_PROOF == 0x5EEDC0DEu);
+    g_atk_vec = v + 1u;
+    if (g_atk_vec < 7u) atk_schedule(g_atk_vec);
+
+    /* all seven lifetimes ran: finalize, then the native compartment */
+    static const uint32_t want[6] = { 1, 1, 0, 2, 3, 4 };
+    uint32_t vok = 1, iok = (shuru_he() == g_shuru_he);
+    for (int i = 0; i < 6; i++) {
+        if (MON_VERDICTS[i] != want[i] || STATUS[S_CAIJUE + i] != want[i]) vok = 0;
+    }
+    STATUS[S_VINTACT] = vok;
+    STATUS[S_IINTACT] = iok;
+    STATUS[S_INTER] = g_ri_xuhao;
+    for (int i = 0; i < 5; i++) {
+        STATUS[S_LOG0C + i * 2] = g_ri_yuanyin[i];
+        STATUS[S_LOG0C + 1 + i * 2] = g_ri_zhi[i];
+    }
+    STATUS[S_NAT2] = 0u;
+    g_jieduan = 5;
+    compartment_enter(2u);
+}
+
+static void native_done(void) {
+    STATUS[S_NAT2] = *(volatile uint32_t *)NAT_SRAM;
+    STATUS[S_DONE] = 0x600DF00Du;
+
+#ifdef QEMU_TARGET
+    report();
+    __asm__ volatile ("j sweep_next");   /* no caller frame: jump, don't return */
+#else
+    uart_puts("\nverdicts:");
+    for (int i = 0; i < 6; i++) {
+        uart_puts(" ");
+        uart_putdec(STATUS[S_CAIJUE + i]);
+    }
+    uart_puts("\n");
+    uint32_t hb = 0;
+    for (;;) {
+        STATUS[3] = hb++;
+        for (volatile int k = 0; k < 20000; ++k) __asm__ volatile ("nop");
+    }
+#endif
+}
+
+/* U-mode fault resume (contract v1.1): the running compartment's first
+ * fault ends its lifetime. The trap path already saved the frame into the
+ * TCB, wiped the register file, and logged mcause/mtval in the ring. */
+void guanli_fault(uint32_t yuanyin, uint32_t zhi) {
+    (void)yuanyin; (void)zhi;
+    compartment_evict(cur_comp);
+    if (g_jieduan == 4) {
+        atk_advance();
+    } else if (g_jieduan >= 5) {
+        native_done();               /* evicted native: nat2 stays 0 */
+    } else {
+        for (;;) {                   /* monitor fault: fail-stop */
+            STATUS[3]++;
+            for (volatile int k = 0; k < 20000; ++k) __asm__ volatile ("nop");
+        }
+    }
+}
 
 void guanli_huifu(void) {
     if (g_jieduan == 1) {                       
@@ -303,47 +390,12 @@ void guanli_huifu(void) {
         }
         STATUS[S_CYC2] = cyc;
         STATUS[S_NATOK] = natok;
-        compartment_arm(1u);
-        g_zhiding = (uint32_t)attacker_recover;
         g_jieduan = 4;
-        compartment_enter(1u);
-    } else if (g_jieduan == 4) {             /* attacker done: collect, then native */
-        static const uint32_t want[6] = { 1, 1, 0, 2, 3, 4 };
-        uint32_t vok = 1, iok = (shuru_he() == g_shuru_he);
-        for (int i = 0; i < 6; i++) {
-            if (MON_VERDICTS[i] != want[i] || STATUS[S_CAIJUE + i] != want[i]) vok = 0;
-        }
-        STATUS[S_VINTACT] = vok;
-        STATUS[S_IINTACT] = iok;
-        STATUS[S_OWNOOK] = (*ATK_OWN == 0xBEEF5EEDu);
-        STATUS[S_INTER] = g_ri_xuhao;
-        for (int i = 0; i < 5; i++) {
-            STATUS[S_LOG0C + i * 2] = g_ri_yuanyin[i];
-            STATUS[S_LOG0C + 1 + i * 2] = g_ri_zhi[i];
-        }
-        STATUS[S_RDROK] = (*ATK_PROOF == 0x5EEDC0DEu);
-        STATUS[S_NAT2] = 0u;
-        g_jieduan = 5;
-        compartment_enter(2u);
-    } else {                                 /* native done: proof + report */
-        STATUS[S_NAT2] = *(volatile uint32_t *)NAT_SRAM;
-        STATUS[S_DONE] = 0x600DF00Du;
-
-#ifdef QEMU_TARGET
-        report();
-        __asm__ volatile ("j sweep_next");   /* no caller frame: jump, don't return */
-#else
-        uart_puts("\nverdicts:");
-        for (int i = 0; i < 6; i++) {
-            uart_puts(" ");
-            uart_putdec(STATUS[S_CAIJUE + i]);
-        }
-        uart_puts("\n");
-        uint32_t hb = 0;
-        for (;;) {
-            STATUS[3] = hb++;
-            for (volatile int k = 0; k < 20000; ++k) __asm__ volatile ("nop");
-        }
-#endif
+        g_atk_vec = 0;
+        atk_schedule(0u);
+    } else if (g_jieduan == 4) {             /* an attacker lifetime yielded */
+        atk_advance();
+    } else {
+        native_done();
     }
 }

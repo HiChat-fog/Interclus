@@ -50,6 +50,9 @@ SECTIONS {
     . = ALIGN(4);
     __comp_end = .;
   }
+  .meas_res 0x20001900 (NOLOAD) : {
+    KEEP(*(.meas_res))
+  }
   _stack_top     = 0x20003F00;  
   _sup_stack_top = 0x20003F00;  
   _mon_stack_top = 0x20005F00;  

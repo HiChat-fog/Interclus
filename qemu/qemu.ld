@@ -11,6 +11,7 @@ SECTIONS {
     main_qemu.o(.text .text.*)
     load_test.o(.text .text.*)
     load_urx.o(.text .text.*)
+    measure.o(.text .text.*)
     compartment.o(.text .text.*)
     report.o(.text .text.*)
     uart.o(.text .text.*)
@@ -19,6 +20,7 @@ SECTIONS {
     main_qemu.o(.rodata .rodata.*)
     load_test.o(.rodata .rodata.*)
     load_urx.o(.rodata .rodata.*)
+    measure.o(.rodata .rodata.*)
     compartment.o(.rodata .rodata.*)
     report.o(.rodata .rodata.*)
     uart.o(.rodata .rodata.*)
@@ -31,6 +33,7 @@ SECTIONS {
     main_qemu.o(.data .data.*)
     load_test.o(.data .data.*)
     load_urx.o(.data .data.*)
+    measure.o(.data .data.*)
     compartment.o(.data .data.*)
     report.o(.data .data.*)
     uart.o(.data .data.*)
@@ -43,6 +46,7 @@ SECTIONS {
     main_qemu.o(.bss .bss.* COMMON)
     load_test.o(.bss .bss.* COMMON)
     load_urx.o(.bss .bss.* COMMON)
+    measure.o(.bss .bss.* COMMON)
     compartment.o(.bss .bss.* COMMON)
     report.o(.bss .bss.* COMMON)
     uart.o(.bss .bss.* COMMON)
@@ -78,7 +82,8 @@ SECTIONS {
     KEEP(*(.comp_state))
     . = ALIGN(4);
     __comp_end = .;
-  } > RAM
+  }
+  .meas_res 0x80010D00 (NOLOAD) : { KEEP(*(.meas_res)) } > RAM
   .trap_scratch 0x80010F00 (NOLOAD) : { KEEP(*(.trap_scratch)) } > RAM
 }
 
