@@ -16,9 +16,9 @@
 #endif
 
 
-extern void xianjing_rukou(void);
-extern void guanli_huifu(void);
-extern void guanli_fault(uint32_t yuanyin, uint32_t zhi);
+extern void trap_entry(void);
+extern void supervisor_resume(void);
+extern void supervisor_fault(uint32_t yuanyin, uint32_t zhi);
 extern void monitor_entry(void);
 extern void attacker_entry(void);
 extern void attacker_v1(void);
@@ -28,23 +28,34 @@ extern void attacker_v4(void);
 extern void attacker_v5(void);
 extern void attacker_v6(void);
 extern char trap_sp0_top[];       /* M-mode fault scratch stack, from trap.S */
+extern void *memcpy(void *dst, const void *src, unsigned int n);
 
-volatile uint32_t g_ri_xuhao = 0;
-volatile uint32_t g_ri_yuanyin[8];
-volatile uint32_t g_ri_zhi[8];
-static volatile uint32_t g_jieduan = 1;
-static volatile uint32_t g_shuru_he = 0;
+volatile uint32_t g_ri_index = 0;
+volatile uint32_t g_ri_cause[8];
+volatile uint32_t g_ri_addr[8];
+static volatile uint32_t g_phase = 1;
+static volatile uint32_t g_input_sum = 0;
 static volatile uint32_t g_stk0 = 0;
-static volatile uint32_t g_jingbao = 0;
-static volatile uint32_t g_chongtu_n = 0;
-static volatile uint32_t g_laiyuan = 0;
+static volatile uint32_t g_alerts = 0;
+static volatile uint32_t g_conflict_n = 0;
+static volatile uint32_t g_source = 0;
 static volatile uint32_t g_atk_vec = 0;   /* attacker lifetime in flight */
 
-static void csr_xie(unsigned csr, uint32_t v) {
+static void enter_checked(unsigned i);
+static void schedule_round(void);
+static void heartbeat(void);
+
+__attribute__((noinline))
+static void heartbeat(void) {
+    STATUS[3]++;
+    for (volatile int k = 0; k < 20000; ++k) __asm__ volatile ("nop");
+}
+
+static void csr_write(unsigned csr, uint32_t v) {
     __asm__ volatile ("csrw %0, %1" :: "n" (csr), "r" (v) : "memory");
 }
 
-static uint32_t shuru_he(void) {
+static uint32_t input_sum(void) {
     uint32_t s = 0;
     for (int i = 0; i < 6; i++) {
         uint32_t sz = MON_SIZES[i];
@@ -92,6 +103,8 @@ static void load_program(void) {
     const volatile uint32_t *area = (const volatile uint32_t *)PROG_AREA;
     uint32_t cnt;
     MON_PROG_CNT[0] = 0u;
+    MON_PROG_B_CNT[0] = 0u;      /* shadow starts empty every boot */
+    MON_PROG_FAULT[0] = 0u;
     STATUS[S_LOAD] = 0u;
     if (area[0] != PROG_MAGIC) return;
     cnt = area[1];
@@ -130,7 +143,7 @@ static void uart_load(void) {
     for (uint32_t i = 0; i < n; i++) dst[i] = stage[i];
 }
 
-void rukou(void) {
+void boot_main(void) {
     uint32_t gate = boot_gate();
     if (gate) {
         STATUS[S_GATE] = 0xC0DE0000u | gate;
@@ -140,14 +153,11 @@ void rukou(void) {
         uart_puts(" ==\n");
         for (;;) qemu_exit(1);
 #else
-        for (;;) {
-            STATUS[3]++;
-            for (volatile int k = 0; k < 20000; ++k) __asm__ volatile ("nop");
-        }
+        for (;;) heartbeat();
 #endif
     }
     STATUS[S_GATE] = 0xC0DE0000u;
-    csr_xie(0x340, (uint32_t)trap_sp0_top);   /* mscratch: fault scratch */
+    csr_write(0x340, (uint32_t)trap_sp0_top);   /* mscratch: fault scratch */
     STATUS[0] = 0xDEADBEEFu;
     STATUS[1] = 0xC0DE0008u;
     {
@@ -186,8 +196,16 @@ void rukou(void) {
     uart_load();
     load_program();
 
-    csr_xie(0x305, (uint32_t)xianjing_rukou);
+    csr_write(0x305, (uint32_t)trap_entry);
+    schedule_round();
+}
 
+/* one schedule pass: refresh the monitor's inputs from the mailbox, wire
+ * all three compartments fresh, and enter the monitor. boot_main does this
+ * after the gates; hot_round does it alone — the schedule re-runs without
+ * a reboot, which is the whole point of the hot path. */
+__attribute__((noinline))
+static void schedule_round(void) {
     {
         uint32_t off = 0;
         const uint8_t *bao[6] = { PKT_GPI, PKT_HB, PKT_BADMAGIC,
@@ -203,18 +221,18 @@ void rukou(void) {
         }
     }
 
-    g_chongtu_n = 0;
+    g_conflict_n = 0;
     if (MAILBOX[0] == MO_SHU && MAILBOX[1] >= 1u && MAILBOX[1] <= MAX_SWARM) {
-        g_chongtu_n = MAILBOX[1];
-        for (uint32_t i = 0; i < g_chongtu_n; i++) {
+        g_conflict_n = MAILBOX[1];
+        for (uint32_t i = 0; i < g_conflict_n; i++) {
             MON_SOFF[i] = i * 42u;
             MON_SSIZES[i] = 42u;
             for (uint32_t j = 0; j < 42u; j++)
                 MON_DATA[i * 42u + j] = MB_DATA[i * 42u + j];
         }
-        g_laiyuan = 1;
+        g_source = 1;
     } else {
-        g_chongtu_n = 8;
+        g_conflict_n = 8;
         for (uint32_t i = 0; i < 8; i++) {
             MON_SOFF[i] = i * 42u;
             MON_SSIZES[i] = 42u;
@@ -230,9 +248,9 @@ void rukou(void) {
             for (uint32_t j = 18u; j < 42u; j++)
                 MON_DATA[i * 42u + j] = PKT_GPI[j];
         }
-        g_laiyuan = 0;
+        g_source = 0;
     }
-    MON_CONFN[0] = g_chongtu_n;
+    MON_CONFN[0] = g_conflict_n;
     for (uint32_t c = 0; c < MAP_CELLS; c++) MON_MAP[c] = 0;
 
     compartment_set(0u, &ic_comp_monitor, (uint32_t)monitor_entry - MON_TEXT);
@@ -246,30 +264,82 @@ void rukou(void) {
         while (src < _binary_native_demo_bin_end) *dst++ = *src++;
     }
     compartment_arm(0u);
-    g_jieduan = 1;
+    g_phase = 1;
     MON_MODE[0] = 0u;
     g_stk0 = TIMER_NOW();
-    compartment_enter(0u);
+    enter_checked(0u);
 }
-
 
 #ifdef QEMU_TARGET
 void supervisor_reset(void) {
-    g_jieduan = 1;
-    g_shuru_he = 0;
-    g_stk0 = 0;
-    g_jingbao = 0;
-    g_chongtu_n = 0;
-    g_laiyuan = 0;
-    g_atk_vec = 0;
-    g_ri_xuhao = 0;
-    for (int i = 0; i < 8; i++) { g_ri_yuanyin[i] = 0; g_ri_zhi[i] = 0; }
-}
+#else
+void supervisor_reset(void) {
 #endif
+    g_phase = 1;
+    g_input_sum = 0;
+    g_stk0 = 0;
+    g_alerts = 0;
+    g_conflict_n = 0;
+    g_source = 0;
+    g_atk_vec = 0;
+    g_ri_index = 0;
+    for (int i = 0; i < 8; i++) { g_ri_cause[i] = 0; g_ri_addr[i] = 0; }
+}
 
-/* attacker lifetimes (contract v1.1): one vector per compartment, either
- * it yields (ecall) or its first fault evicts it; the schedule advances
- * either way and the evidence lands in the forensics ring unchanged. */
+/* contract v1.1 hot path: a transport stages an image at PROG_PEND under
+ * PROG_PEND_MAGIC; between rounds it must pass the same gates as a boot
+ * image before it may replace the live program. The live image moves to
+ * the shadow slot as last-known-good. A rejected image is consumed and
+ * recorded — the running schedule is never touched. */
+void hot_swap(void) {
+    volatile uint32_t *pend = (volatile uint32_t *)PROG_PEND_ADDR;
+    const volatile uint8_t *src;
+    uint32_t cnt, i;
+    int b;
+    if (pend[0] != PROG_PEND_MAGIC) return;
+    cnt = pend[1];
+    if (!cnt || cnt > IC_PROG_MAX_INSNS) { STATUS[S_HREJ]++; pend[0] = 0u; return; }
+    {
+        ic_module_desc d = { IC_MODULE_MAGIC, IC_CONTRACT_VERSION,
+                             IC_MODULE_EBPF, (uint32_t)MON_PROG, cnt * 8u,
+                             0u, 0u, 0u, 0u };
+        if (ic_module_check(&d) != IC_OK ||
+            ic_program_check((const uint64_t *)(PROG_PEND_ADDR + 8u), cnt) != IC_OK) {
+            STATUS[S_HREJ]++; pend[0] = 0u; return;
+        }
+    }
+    MON_PROG_B_CNT[0] = MON_PROG_CNT[0];              /* live -> shadow */
+    memcpy((void *)MON_PROG_B, (void *)MON_PROG, 512u);
+    src = (const volatile uint8_t *)PROG_PEND_ADDR + 8u;
+    for (i = 0; i < cnt; i++) {                       /* staged -> live */
+        uint64_t v = 0;
+        for (b = 7; b >= 0; b--) v = (v << 8) | src[i * 8u + (uint32_t)b];
+        MON_PROG[i] = v;
+    }
+    MON_PROG_CNT[0] = cnt;
+    MON_PROG_FAULT[0] = 0u;
+    pend[0] = 0u;                                     /* consumed */
+    STATUS[S_HLOAD]++;
+}
+
+/* re-run the schedule without a reboot: same compartments, current live
+ * program. The box slots (live/shadow) persist; phase and forensics state
+ * start clean. This is the runtime half of hot loading. */
+void hot_round(void) {
+    supervisor_reset();
+    schedule_round();
+}
+
+/* the schedule must never hand the CPU to an evicted lifetime: refuse
+ * loudly (gate-style heartbeat, visible in a dump) instead of parking the
+ * core silently inside the mechanism's fail-stop */
+static void enter_checked(unsigned i) {
+    if (compartment_evicted(i)) {
+        for (;;) heartbeat();
+    }
+    compartment_enter(i);
+}
+
 static void (*const atk_vec[7])(void) = {
     attacker_entry, attacker_v1, attacker_v2, attacker_v3,
     attacker_v4, attacker_v5, attacker_v6
@@ -279,7 +349,7 @@ static void atk_schedule(unsigned v) {
     compartment_set(1u, &ic_comp_attacker,
                     (uint32_t)atk_vec[v] - ATK_TEXT);   /* fresh lifetime */
     compartment_arm(1u);
-    compartment_enter(1u);
+    enter_checked(1u);
 }
 
 static void atk_advance(void) {
@@ -291,20 +361,20 @@ static void atk_advance(void) {
 
     /* all seven lifetimes ran: finalize, then the native compartment */
     static const uint32_t want[6] = { 1, 1, 0, 2, 3, 4 };
-    uint32_t vok = 1, iok = (shuru_he() == g_shuru_he);
+    uint32_t vok = 1, iok = (input_sum() == g_input_sum);
     for (int i = 0; i < 6; i++) {
         if (MON_VERDICTS[i] != want[i] || STATUS[S_CAIJUE + i] != want[i]) vok = 0;
     }
     STATUS[S_VINTACT] = vok;
     STATUS[S_IINTACT] = iok;
-    STATUS[S_INTER] = g_ri_xuhao;
+    STATUS[S_INTER] = g_ri_index;
     for (int i = 0; i < 5; i++) {
-        STATUS[S_LOG0C + i * 2] = g_ri_yuanyin[i];
-        STATUS[S_LOG0C + 1 + i * 2] = g_ri_zhi[i];
+        STATUS[S_LOG0C + i * 2] = g_ri_cause[i];
+        STATUS[S_LOG0C + 1 + i * 2] = g_ri_addr[i];
     }
     STATUS[S_NAT2] = 0u;
-    g_jieduan = 5;
-    compartment_enter(2u);
+    g_phase = 5;
+    enter_checked(2u);
 }
 
 static void native_done(void) {
@@ -321,10 +391,19 @@ static void native_done(void) {
         uart_putdec(STATUS[S_CAIJUE + i]);
     }
     uart_puts("\n");
-    uint32_t hb = 0;
-    for (;;) {
-        STATUS[3] = hb++;
-        for (volatile int k = 0; k < 20000; ++k) __asm__ volatile ("nop");
+    {
+        /* service loop: poll the staging area, and on a promotion re-run
+         * the whole schedule against the new program — the board stays
+         * live across swaps */
+        uint32_t seen = STATUS[S_HLOAD];
+        for (;;) {
+            hot_swap();
+            if (STATUS[S_HLOAD] != seen) {
+                seen = STATUS[S_HLOAD];
+                hot_round();             /* noreturn: re-enters here */
+            }
+            heartbeat();
+        }
     }
 #endif
 }
@@ -332,56 +411,67 @@ static void native_done(void) {
 /* U-mode fault resume (contract v1.1): the running compartment's first
  * fault ends its lifetime. The trap path already saved the frame into the
  * TCB, wiped the register file, and logged mcause/mtval in the ring. */
-void guanli_fault(uint32_t yuanyin, uint32_t zhi) {
+void supervisor_fault(uint32_t yuanyin, uint32_t zhi) {
     (void)yuanyin; (void)zhi;
     compartment_evict(cur_comp);
-    if (g_jieduan == 4) {
+    if (g_phase == 4) {
         atk_advance();
-    } else if (g_jieduan >= 5) {
+    } else if (g_phase >= 5) {
         native_done();               /* evicted native: nat2 stays 0 */
     } else {
-        for (;;) {                   /* monitor fault: fail-stop */
-            STATUS[3]++;
-            for (volatile int k = 0; k < 20000; ++k) __asm__ volatile ("nop");
-        }
+        for (;;) heartbeat();        /* monitor fault: fail-stop */
     }
 }
 
-void guanli_huifu(void) {
-    if (g_jieduan == 1) {                       
+void supervisor_resume(void) {
+    if (g_phase == 1) {                       
         uint32_t cyc = TIMER_NOW() - g_stk0;
         for (int i = 0; i < 6; i++) {
             STATUS[S_CAIJUE + i] = MON_VERDICTS[i];
             STATUS[S_INSNS + i] = MON_INSNS[i];
         }
         STATUS[S_CYC0] = cyc;
-        g_shuru_he = shuru_he();
+        g_input_sum = input_sum();
+        /* the live program just had a round: an interpreter fault here is
+         * a one-strike rollback to the shadow (last-known-good), or to the
+         * built-in policy when no shadow exists */
+        if (MON_PROG_CNT[0] && MON_PROG_FAULT[0]) {
+            if (MON_PROG_B_CNT[0]) {
+                memcpy((void *)MON_PROG, (void *)MON_PROG_B, 512u);
+                MON_PROG_CNT[0] = MON_PROG_B_CNT[0];
+                MON_PROG_B_CNT[0] = 0u;
+            } else {
+                MON_PROG_CNT[0] = 0u;
+            }
+            MON_PROG_FAULT[0] = 0u;
+            STATUS[S_ROLL]++;
+        }
         compartment_arm(0u);
-        g_jieduan = 2;
+        g_phase = 2;
         MON_MODE[0] = 1u;
         g_stk0 = TIMER_NOW();
-        compartment_enter(0u);
-    } else if (g_jieduan == 2) {                
+        enter_checked(0u);
+    } else if (g_phase == 2) {                
         uint32_t cyc = TIMER_NOW() - g_stk0;
         uint32_t alerts = 0;
-        for (uint32_t i = 0; i < g_chongtu_n && i < 8u; i++) {
+        for (uint32_t i = 0; i < g_conflict_n && i < 8u; i++) {
             STATUS[S_BAN_CAIJUE + i] = MON_SCREEN_VERD[i];
             STATUS[S_CINSNS + i] = MON_SCREEN_INSNS[i];
         }
-        for (uint32_t i = 0; i < g_chongtu_n; i++) {
+        for (uint32_t i = 0; i < g_conflict_n; i++) {
             if (MON_SCREEN_VERD[i] == 5u) alerts++;
         }
-        g_jingbao = alerts;
+        g_alerts = alerts;
         STATUS[S_CYC1] = cyc;
-        STATUS[S_JINGBAO] = g_jingbao;
-        STATUS[S_CHONGTU_N] = g_chongtu_n;
-        STATUS[S_LAIYUAN] = g_laiyuan;
+        STATUS[S_JINGBAO] = g_alerts;
+        STATUS[S_CHONGTU_N] = g_conflict_n;
+        STATUS[S_LAIYUAN] = g_source;
         compartment_arm(0u);
-        g_jieduan = 3;
+        g_phase = 3;
         MON_MODE[0] = 2u;
         g_stk0 = TIMER_NOW();
-        compartment_enter(0u);
-    } else if (g_jieduan == 3) {                
+        enter_checked(0u);
+    } else if (g_phase == 3) {                
         uint32_t cyc = TIMER_NOW() - g_stk0;
         static const uint32_t want[6] = { 1, 1, 0, 2, 3, 4 };
         uint32_t natok = 1;
@@ -390,10 +480,10 @@ void guanli_huifu(void) {
         }
         STATUS[S_CYC2] = cyc;
         STATUS[S_NATOK] = natok;
-        g_jieduan = 4;
+        g_phase = 4;
         g_atk_vec = 0;
         atk_schedule(0u);
-    } else if (g_jieduan == 4) {             /* an attacker lifetime yielded */
+    } else if (g_phase == 4) {             /* an attacker lifetime yielded */
         atk_advance();
     } else {
         native_done();

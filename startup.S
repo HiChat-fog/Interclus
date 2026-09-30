@@ -25,7 +25,7 @@ _start:
     addi    t0, t0, 4
     j       3b
 4:
-    call    rukou
+    call    boot_main
 5:
     wfi
     j       5b

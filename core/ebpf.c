@@ -3,7 +3,7 @@
 
 #include "ebpf.h"
 
-static void jiema(uint64_t e, struct ebpf_insn *d) {
+static void decode_insn(uint64_t e, struct ebpf_insn *d) {
     d->opcode = (uint8_t)(e & 0xff);
     d->dst    = (uint8_t)((e >> 8) & 0x0f);
     d->src    = (uint8_t)((e >> 12) & 0x0f);
@@ -67,18 +67,28 @@ static uint64_t load_le(const uint8_t *m, uint8_t size) {
 }
 
 int ebpf_run(const struct ebpf_prog *p, struct ebpf_result *r) {
+    /* programs cannot rewrite themselves (no store), so the whole image is
+     * decoded once instead of field-by-field on every step. Stack local on
+     * purpose: a static here lands in the monitor box's fixed slot window
+     * (.monitor_ram sits at MON_BOX+0) and corrupts it. */
+    struct ebpf_insn dec[EBPF_MAX_INSNS];
     uint64_t regs[11] = {0};
     uint32_t steps = 0, pc = 0;
     struct ebpf_insn in;
     r->fault = EBPF_OK;
     r->insns_executed = 0;
     regs[1] = (uint64_t)(uintptr_t)p->ctx;
+    if (p->insn_cnt == 0 || p->insn_cnt > EBPF_MAX_INSNS) {
+        r->fault = EBPF_FAULT_PC;
+        goto out;
+    }
+    for (uint32_t i = 0; i < p->insn_cnt; i++) decode_insn(p->ins[i], &dec[i]);
 
     for (;;) {
         uint8_t cls, op;
         if (pc >= p->insn_cnt) { r->fault = EBPF_FAULT_PC; break; }
         if (++steps > p->max_steps) { r->fault = EBPF_FAULT_STEPS; break; }
-        jiema(p->ins[pc], &in);
+        in = dec[pc];
         r->insns_executed++;
         if (in.dst > 10u || in.src > 10u) {
             /* register fields are four bits; r11..r15 do not exist */
@@ -152,7 +162,13 @@ int ebpf_run(const struct ebpf_prog *p, struct ebpf_result *r) {
             int taken;
             if (cls == CLS_JMP && op == JMP_CALL) {
 
-                if (p->map == 0 || p->map_cells == 0) { r->fault = EBPF_FAULT_CALL; goto out; }
+                /* map_cells must be a power of two: the mask indexing below
+                 * stays in bounds either way, but only a power of two gives
+                 * uniform coverage of the declared cells */
+                if (p->map == 0 || p->map_cells == 0 ||
+                    (p->map_cells & (p->map_cells - 1u)) != 0) {
+                    r->fault = EBPF_FAULT_CALL; goto out;
+                }
                 switch (in.imm) {
                 case 1:
                     regs[0] = p->map[(uint32_t)regs[1] & (p->map_cells - 1u)];

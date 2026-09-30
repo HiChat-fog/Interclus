@@ -16,6 +16,10 @@
 
 struct ebpf_insn { uint8_t opcode, dst, src; int16_t off; int32_t imm; };
 
+/* the loader caps programs here; the interpreter mirrors the bound so its
+ * decode-once cache can be a fixed array */
+#define EBPF_MAX_INSNS 64u
+
 struct ebpf_prog {
     const uint64_t *ins;      
     uint32_t       insn_cnt;

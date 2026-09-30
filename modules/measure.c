@@ -17,13 +17,13 @@ void uart_puts(const char *s);
 void uart_putdec(uint32_t v);
 void uart_puthex(uint32_t v);
 
-extern void xianjing_rukou(void);
+extern void trap_entry(void);
 extern uint32_t trap_sp0_top[];      /* scratch end (linker symbol) */
 
 /* trap.S contract: fault forensics + the two supervisor resume points */
-volatile uint32_t g_ri_xuhao;
-volatile uint32_t g_ri_yuanyin[8];
-volatile uint32_t g_ri_zhi[8];
+volatile uint32_t g_ri_index;
+volatile uint32_t g_ri_cause[8];
+volatile uint32_t g_ri_addr[8];
 
 enum {
     R_OVH, R_ARMF0, R_ARMS0, R_ARMF1, R_ARMS1,
@@ -82,8 +82,8 @@ static const ic_compartment_spec spec0 = { NAT_TEXT, 4096u, NAT_SRAM, 4096u };
 /* Slice protocol (both comps share identical specs, so a cross switch
  * pays exactly the cross-compartment re-arm cost; enter() arms):
  *   s1  0->0 ecall module, armed-skip      s2  0->1 ecall module, full re-arm
- *   s3  0   fault module  -> first fault evicts, resume at guanli_fault */
-void guanli_huifu(void) {
+ *   s3  0   fault module  -> first fault evicts, resume at supervisor_fault */
+void supervisor_resume(void) {
     uint32_t back = cyc();
     if (g_step == 1) res[R_SL_SAME] = back - t_enter;
     if (g_step == 2) res[R_SL_CROSS] = back - t_enter;
@@ -100,7 +100,7 @@ void guanli_huifu(void) {
     compartment_enter(nxt);
 }
 
-void guanli_fault(uint32_t yuanyin, uint32_t zhi) {
+void supervisor_fault(uint32_t yuanyin, uint32_t zhi) {
     (void)yuanyin; (void)zhi;
     res[R_SL_EVICT] = cyc() - t_enter;
     compartment_evict(cur_comp);
@@ -108,7 +108,7 @@ void guanli_fault(uint32_t yuanyin, uint32_t zhi) {
     park();
 }
 
-void rukou(void) {
+void boot_main(void) {
     res[R_OVH] = 0xDEADBEEFu;       /* reach marker: survives if we hang */
     TIMER_INIT();
 
@@ -127,7 +127,7 @@ void rukou(void) {
           : (res[R_SAN_MC] >= 30000u) ? 1u : 2u;
 
     uart_init();
-    __asm__ volatile ("csrw mtvec, %0" :: "r" (xianjing_rukou));
+    __asm__ volatile ("csrw mtvec, %0" :: "r" (trap_entry));
     __asm__ volatile ("csrw mscratch, %0" :: "r" (trap_sp0_top));
     uint32_t t0, t1;
     t0 = cyc(); t1 = cyc();
@@ -169,6 +169,6 @@ __asm__(
     "_start:\n"
     "  lui  sp, %hi(_sup_stack_top)\n"
     "  addi sp, sp, %lo(_sup_stack_top)\n"
-    "  j    rukou\n"
+    "  j    boot_main\n"
 );
 #endif

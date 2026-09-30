@@ -29,4 +29,7 @@ $LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_load.elf \
 $CC -DPROG_FROM_UART -c ../qemu/load_test.c -o load_urx.o
 $LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_urx.elf \
     load_urx.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o compartment.o native_blob.o
-echo "build/fw_qemu.elf build/fw_load.elf build/fw_urx.elf"
+$CC -c ../qemu/hot_test.c -o hot_test.o
+$LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_hot.elf \
+    hot_test.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o compartment.o native_blob.o
+echo "build/fw_qemu.elf build/fw_load.elf build/fw_urx.elf build/fw_hot.elf"

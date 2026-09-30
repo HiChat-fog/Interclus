@@ -1,8 +1,8 @@
 
     .section .text
     .align 4
-    .globl xianjing_rukou
-xianjing_rukou:
+    .globl trap_entry
+trap_entry:
     /* unified trap frame on the M-mode scratch stack: the scratch regs are
      * saved BEFORE mcause is read, so the victim's register file survives
      * intact for the TCB evidence copy */
@@ -26,18 +26,18 @@ xianjing_rukou:
     csrr t0, mtval
     sw   t0, 44(sp)
 
-    /* forensics ring: g_ri_yuanyin[idx] = mcause, g_ri_zhi[idx] = mtval */
-    lui  t2, %hi(g_ri_xuhao)
-    addi t2, t2, %lo(g_ri_xuhao)
+    /* forensics ring: g_ri_cause[idx] = mcause, g_ri_addr[idx] = mtval */
+    lui  t2, %hi(g_ri_index)
+    addi t2, t2, %lo(g_ri_index)
     lw   t3, 0(t2)
     slli t4, t3, 2
-    lui  t5, %hi(g_ri_yuanyin)
-    addi t5, t5, %lo(g_ri_yuanyin)
+    lui  t5, %hi(g_ri_cause)
+    addi t5, t5, %lo(g_ri_cause)
     add  t5, t5, t4
     lw   t6, 40(sp)
     sw   t6, 0(t5)
-    lui  t5, %hi(g_ri_zhi)
-    addi t5, t5, %lo(g_ri_zhi)
+    lui  t5, %hi(g_ri_addr)
+    addi t5, t5, %lo(g_ri_addr)
     add  t5, t5, t4
     lw   t6, 44(sp)
     sw   t6, 0(t5)
@@ -59,7 +59,7 @@ xianjing_rukou:
     /* U-mode fault (contract v1.1): the compartment's first fault evicts
      * it. The victim's register file goes into TCB[cur_tcb] as evidence,
      * every register and the scratch frame are wiped, and the supervisor
-     * resumes at guanli_fault(mcause, mtval). This replaces v1's
+     * resumes at supervisor_fault(mcause, mtval). This replaces v1's
      * skip-and-continue and the g_zhiding redirect. */
     lui  t0, %hi(cur_tcb)
     lw   t0, %lo(cur_tcb)(t0)
@@ -106,7 +106,7 @@ xianjing_rukou:
     csrr t1, mscratch
     sw   t1, 8(t0)              /* TCB[2] = victim sp */
 .Lev_nosave:
-    lw   a0, 40(sp)             /* guanli_fault(mcause, mtval) */
+    lw   a0, 40(sp)             /* supervisor_fault(mcause, mtval) */
     lw   a1, 44(sp)
     /* no victim byte may survive in M-mode memory */
     sw   x0, 0(sp)
@@ -155,8 +155,8 @@ xianjing_rukou:
     mv   x31, x0
     lui  sp, %hi(_sup_stack_top)
     addi sp, sp, %lo(_sup_stack_top)
-    lui  t0, %hi(guanli_fault)
-    addi t0, t0, %lo(guanli_fault)
+    lui  t0, %hi(supervisor_fault)
+    addi t0, t0, %lo(supervisor_fault)
     csrw mepc, t0
     csrr t1, mstatus
     li   t2, 0x1800
@@ -269,8 +269,8 @@ xianjing_rukou:
     mv   x31, x0
     lui  sp, %hi(_sup_stack_top)
     addi sp, sp, %lo(_sup_stack_top)
-    lui  t0, %hi(guanli_huifu)
-    addi t0, t0, %lo(guanli_huifu)
+    lui  t0, %hi(supervisor_resume)
+    addi t0, t0, %lo(supervisor_resume)
     csrw mepc, t0
     csrr t1, mstatus
     li   t2, 0x1800

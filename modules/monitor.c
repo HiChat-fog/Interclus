@@ -70,12 +70,17 @@ void monitor_main(void) {
         prog.map = 0;
         prog.map_cells = 0;
         prog.max_steps = 1000000u;
-        for (i = 0; i < 6; i++) {
-            prog.ctx = (const uint8_t *)(MON_INPUT + MON_OFF[i]);
-            prog.ctx_size = MON_SIZES[i];
-            ebpf_run(&prog, &r);
-            MON_VERDICTS[i] = (uint32_t)r.retval;
-            MON_INSNS[i] = r.insns_executed;
+        {
+            uint32_t pf = 0;
+            for (i = 0; i < 6; i++) {
+                prog.ctx = (const uint8_t *)(MON_INPUT + MON_OFF[i]);
+                prog.ctx_size = MON_SIZES[i];
+                ebpf_run(&prog, &r);
+                MON_VERDICTS[i] = (uint32_t)r.retval;
+                MON_INSNS[i] = r.insns_executed;
+                if (r.fault) pf = r.fault;
+            }
+            MON_PROG_FAULT[0] = pf;   /* the supervisor rolls back on this */
         }
         break;
     }

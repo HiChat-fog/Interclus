@@ -45,3 +45,5 @@ jobs:
           grep -q "== LOAD PASS ==" urx.log
           python3 tools/uart_frame.py --corrupt | timeout 30 qemu-system-riscv32 -M virt -bios none -kernel build/fw_urx.elf -display none -serial stdio -monitor none | tee urx_bad.log || true
           grep -q "== LOAD FAIL ==" urx_bad.log
+          timeout 30 qemu-system-riscv32 -M virt -bios none -kernel build/fw_hot.elf -display none -serial stdio -monitor none < /dev/null | tee hot.log
+          grep -q "== HOT PASS ==" hot.log

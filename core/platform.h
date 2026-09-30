@@ -70,6 +70,17 @@
 #define MON_PROG     ((volatile uint64_t *)(MON_BOX + 0x1600u))
 #define PROG_MAGIC   0x474F5250u   /* "PROG" */
 
+/* hot-swap slots: B is the last-known-good shadow (count word trails the
+ * image); MON_PROG_FAULT is the live program's last interpreter fault */
+#define MON_PROG_B      ((volatile uint64_t *)(MON_BOX + 0x1800u))
+#define MON_PROG_B_CNT  ((volatile uint32_t *)(MON_BOX + 0x1A00u))
+#define MON_PROG_FAULT  ((volatile uint32_t *)(MON_BOX + 0x15F8u))
+
+/* runtime staging area for the hot path: a transport writes an image plus
+ * PROG_PEND_MAGIC here between rounds; hot_swap() gates and consumes it */
+#define PROG_PEND_ADDR  (PROG_AREA + 0x800u)
+#define PROG_PEND_MAGIC 0x444E4550u   /* "PEND" */
+
 /* attacker-box slots */
 #define ATK_OWN      ((volatile uint32_t *)(ATK_BOX + 0x0u))
 #define ATK_PROOF    ((volatile uint32_t *)(ATK_BOX + 0x8u))
@@ -98,6 +109,9 @@
 #define S_UTX     90u   /* UART TX self-test: STK ticks for 64 bytes */
 #define S_URX     91u   /* UART loopback: 1 matched, 0 no/failed */
 #define S_NAT2    92u   /* native compartment proof word */
+#define S_HLOAD   93u   /* hot swaps promoted through the gates */
+#define S_HREJ    94u   /* hot swaps rejected by the gates */
+#define S_ROLL    95u   /* runtime rollbacks to last-known-good */
 
 /* PMP NAPOT encodings, derived from the map */
 #define NAPOT(base, size) (((base) >> 2) | ((size) >> 3) - 1u)

@@ -10,7 +10,7 @@ void uart_puts(const char *s);
 void uart_putdec(uint32_t v);
 int report(void);
 extern volatile int g_report_ok;
-void rukou(void);
+void boot_main(void);
 void supervisor_reset(void);
 void qemu_exit(int code);
 
@@ -33,7 +33,7 @@ void sweep_next(void) {
     for (unsigned i = 0; i < 8u + 42u * sweeps[sweep_t].n; i++)
         mailbox_ram[i] = sweeps[sweep_t].data[i];
     supervisor_reset();
-    rukou();
+    boot_main();
 }
 
 __attribute__((section(".text.startup")))
@@ -42,7 +42,7 @@ void boot(void) {
     for (unsigned i = 0; i < 8u + 42u * sweeps[0].n; i++)
         mailbox_ram[i] = sweeps[0].data[i];
     supervisor_reset();
-    rukou();
+    boot_main();
     for (;;) { __asm__ volatile ("wfi"); }
 }
 

@@ -79,7 +79,10 @@ typedef struct {
     const uint8_t  *ctx;         /* packet buffer, read-only to the program */
     uint32_t        ctx_size;
     uint32_t        max_steps;
-    uint32_t       *map;         /* optional grid; NULL = helper calls fault */
+    uint32_t       *map;         /* optional grid; NULL = helper calls fault.
+                                  * map_cells must be a power of two (mask indexing:
+                                   * still in bounds otherwise, but coverage is
+                                   * non-uniform); checked at run. */
     uint32_t        map_cells;
 } ic_program;
 

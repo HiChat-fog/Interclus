@@ -12,7 +12,7 @@
 
 void uart_puts(const char *s);
 int report(void);
-void rukou(void);
+void boot_main(void);
 void supervisor_reset(void);
 void qemu_exit(int code);
 
@@ -38,7 +38,7 @@ void boot(void) {
         ins[i] = pass_all_ins[i];
 #endif
     supervisor_reset();
-    rukou();
+    boot_main();
     for (;;) { __asm__ volatile ("wfi"); }
 }
 

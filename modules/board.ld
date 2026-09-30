@@ -53,6 +53,8 @@ SECTIONS {
   .meas_res 0x20001900 (NOLOAD) : {
     KEEP(*(.meas_res))
   }
+  ASSERT(SIZEOF(.text) <= 0x2000, "supervisor .text overflows the monitor window")
+  ASSERT(SIZEOF(.monitor_text) <= 0x2000, "monitor text overflows its window")
   _stack_top     = 0x20003F00;  
   _sup_stack_top = 0x20003F00;  
   _mon_stack_top = 0x20005F00;  
