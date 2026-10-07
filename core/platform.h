@@ -76,10 +76,21 @@
 #define MON_PROG_B_CNT  ((volatile uint32_t *)(MON_BOX + 0x1A00u))
 #define MON_PROG_FAULT  ((volatile uint32_t *)(MON_BOX + 0x15F8u))
 
-/* runtime staging area for the hot path: a transport writes an image plus
- * PROG_PEND_MAGIC here between rounds; hot_swap() gates and consumes it */
+/* runtime staging area for the hot path. The magic word sits AFTER the
+ * image on purpose: a slow transport (flash-programming word by word)
+ * writes cnt, then the insns, then the magic — the poller never sees a
+ * half-written image. hot_swap consumes the image by clearing the magic.
+ * Word 1 picks the kind: an eBPF program (word 0 = insn count, payload =
+ * insns) or a native module (word 0 = code bytes, word 2 = entry offset,
+ * payload = raw code) — both capped by the 512-byte payload window. */
 #define PROG_PEND_ADDR  (PROG_AREA + 0x800u)
 #define PROG_PEND_MAGIC 0x444E4550u   /* "PEND" */
+#define PROG_PEND_OK    ((volatile uint32_t *)(PROG_PEND_ADDR + 0x208u))
+#define PEND_EBPF       1u
+#define PEND_NATIVE     2u
+
+/* native hot-load shadow (last-known-good): [0]=len, [4]=entry, [8..]=code */
+#define PROG_NSH        (PROG_AREA + 0xC00u)
 
 /* attacker-box slots */
 #define ATK_OWN      ((volatile uint32_t *)(ATK_BOX + 0x0u))

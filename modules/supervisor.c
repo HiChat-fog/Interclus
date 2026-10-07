@@ -40,6 +40,13 @@ static volatile uint32_t g_alerts = 0;
 static volatile uint32_t g_conflict_n = 0;
 static volatile uint32_t g_source = 0;
 static volatile uint32_t g_atk_vec = 0;   /* attacker lifetime in flight */
+static uint32_t g_nat_len;                /* live native image bytes */
+static uint32_t g_nat_entry;              /* its entry offset */
+static uint32_t g_nat_hot;                /* 1 once a hot image replaced
+                                             the built-in demo blob */
+
+extern const uint8_t _binary_native_demo_bin_start[];
+extern const uint8_t _binary_native_demo_bin_end[];
 
 static void enter_checked(unsigned i);
 static void schedule_round(void);
@@ -106,6 +113,12 @@ static void load_program(void) {
     MON_PROG_B_CNT[0] = 0u;      /* shadow starts empty every boot */
     MON_PROG_FAULT[0] = 0u;
     STATUS[S_LOAD] = 0u;
+    STATUS[S_HLOAD] = 0u;        /* hot-path counters start clean too —
+                                    the STATUS window is raw RAM, and a
+                                    counter incrementing from stale junk
+                                    reads as chaos in a dump */
+    STATUS[S_HREJ] = 0u;
+    STATUS[S_ROLL] = 0u;
     if (area[0] != PROG_MAGIC) return;
     cnt = area[1];
     if (!cnt || cnt > IC_PROG_MAX_INSNS) { STATUS[S_LOAD] = 2u; return; }
@@ -196,6 +209,11 @@ void boot_main(void) {
     uart_load();
     load_program();
 
+    g_nat_len = (uint32_t)(_binary_native_demo_bin_end
+                           - _binary_native_demo_bin_start);
+    g_nat_entry = 0u;
+    g_nat_hot = 0u;              /* a boot serves the built-in blob */
+
     csr_write(0x305, (uint32_t)trap_entry);
     schedule_round();
 }
@@ -255,14 +273,14 @@ static void schedule_round(void) {
 
     compartment_set(0u, &ic_comp_monitor, (uint32_t)monitor_entry - MON_TEXT);
     compartment_set(1u, &ic_comp_attacker, (uint32_t)attacker_entry - ATK_TEXT);
-    compartment_set(2u, &ic_comp_native, 0u);
-    {
-        extern const uint8_t _binary_native_demo_bin_start[];
-        extern const uint8_t _binary_native_demo_bin_end[];
+    compartment_set(2u, &ic_comp_native, g_nat_entry);
+    if (!g_nat_hot) {
         const uint8_t *src = _binary_native_demo_bin_start;
         volatile uint8_t *dst = (volatile uint8_t *)NAT_TEXT;
         while (src < _binary_native_demo_bin_end) *dst++ = *src++;
-    }
+    }   /* a hot-loaded native image stays in the slot across rounds */
+    *(volatile uint32_t *)NAT_SRAM = 0u;   /* fresh proof each round:
+                                              an evicted native reads as 0 */
     compartment_arm(0u);
     g_phase = 1;
     MON_MODE[0] = 0u;
@@ -287,39 +305,62 @@ void supervisor_reset(void) {
 }
 
 /* contract v1.1 hot path: a transport stages an image at PROG_PEND under
- * PROG_PEND_MAGIC; between rounds it must pass the same gates as a boot
- * image before it may replace the live program. The live image moves to
- * the shadow slot as last-known-good. A rejected image is consumed and
- * recorded — the running schedule is never touched. */
+ * PROG_PEND_MAGIC (magic lands last); between rounds it must pass the
+ * same gates as a boot image before it may go live. Word 1 picks the
+ * kind: an eBPF program swaps into the monitor slot (shadowed by the B
+ * slot), a native module swaps into NAT_TEXT (shadowed at PROG_NSH). A
+ * rejected image is consumed and recorded — the schedule is never
+ * touched. */
 void hot_swap(void) {
     volatile uint32_t *pend = (volatile uint32_t *)PROG_PEND_ADDR;
-    const volatile uint8_t *src;
-    uint32_t cnt, i;
-    int b;
-    if (pend[0] != PROG_PEND_MAGIC) return;
-    cnt = pend[1];
-    if (!cnt || cnt > IC_PROG_MAX_INSNS) { STATUS[S_HREJ]++; pend[0] = 0u; return; }
-    {
-        ic_module_desc d = { IC_MODULE_MAGIC, IC_CONTRACT_VERSION,
-                             IC_MODULE_EBPF, (uint32_t)MON_PROG, cnt * 8u,
-                             0u, 0u, 0u, 0u };
+    uint32_t w0, kind, i;
+    if (PROG_PEND_OK[0] != PROG_PEND_MAGIC) return;   /* magic lands last */
+    w0 = pend[0];
+    kind = pend[1];
+    if (kind == PEND_NATIVE) {
+        uint32_t entry = pend[2];
+        ic_module_desc d;
+        if (!w0 || w0 > 0x1F0u || (entry & 1u) || entry >= 0x1000u) goto rej;
+        d.magic = IC_MODULE_MAGIC; d.contract_ver = IC_CONTRACT_VERSION;
+        d.kind = IC_MODULE_NATIVE; d.text_base = NAT_TEXT; d.text_size = 0x1000u;
+        d.sram_base = NAT_SRAM; d.sram_size = 0x1000u;
+        d.entry_offset = entry; d.reserved = 0u;
+        if (ic_module_check(&d) != IC_OK) goto rej;
+        *(volatile uint32_t *)PROG_NSH = g_nat_len;          /* shadow live */
+        *(volatile uint32_t *)(PROG_NSH + 4u) = g_nat_entry;
+        memcpy((void *)(PROG_NSH + 8u), (void *)NAT_TEXT, g_nat_len);
+        memcpy((void *)NAT_TEXT,
+               (const void *)(PROG_PEND_ADDR + 12u), w0);   /* staged -> live */
+        g_nat_len = w0;
+        g_nat_entry = entry;
+        g_nat_hot = 1u;
+    } else if (kind == PEND_EBPF) {
+        volatile uint64_t *s = (volatile uint64_t *)(PROG_PEND_ADDR + 8u);
+        ic_module_desc d;
+        if (!w0 || w0 > IC_PROG_MAX_INSNS) goto rej;
+        d.magic = IC_MODULE_MAGIC; d.contract_ver = IC_CONTRACT_VERSION;
+        d.kind = IC_MODULE_EBPF; d.text_base = (uint32_t)MON_PROG;
+        d.text_size = w0 * 8u;
+        d.sram_base = 0u; d.sram_size = 0u;
+        d.entry_offset = 0u; d.reserved = 0u;
         if (ic_module_check(&d) != IC_OK ||
-            ic_program_check((const uint64_t *)(PROG_PEND_ADDR + 8u), cnt) != IC_OK) {
-            STATUS[S_HREJ]++; pend[0] = 0u; return;
+            ic_program_check((const uint64_t *)(PROG_PEND_ADDR + 8u), w0) != IC_OK) {
+            goto rej;
         }
+        MON_PROG_B_CNT[0] = MON_PROG_CNT[0];              /* live -> shadow */
+        memcpy((void *)MON_PROG_B, (void *)MON_PROG, 512u);
+        for (i = 0; i < w0; i++) MON_PROG[i] = s[i];      /* staged -> live */
+        MON_PROG_CNT[0] = w0;
+        MON_PROG_FAULT[0] = 0u;
+    } else {
+        goto rej;
     }
-    MON_PROG_B_CNT[0] = MON_PROG_CNT[0];              /* live -> shadow */
-    memcpy((void *)MON_PROG_B, (void *)MON_PROG, 512u);
-    src = (const volatile uint8_t *)PROG_PEND_ADDR + 8u;
-    for (i = 0; i < cnt; i++) {                       /* staged -> live */
-        uint64_t v = 0;
-        for (b = 7; b >= 0; b--) v = (v << 8) | src[i * 8u + (uint32_t)b];
-        MON_PROG[i] = v;
-    }
-    MON_PROG_CNT[0] = cnt;
-    MON_PROG_FAULT[0] = 0u;
-    pend[0] = 0u;                                     /* consumed */
+    PROG_PEND_OK[0] = 0u;                                 /* consumed */
     STATUS[S_HLOAD]++;
+    return;
+rej:
+    STATUS[S_HREJ]++;
+    PROG_PEND_OK[0] = 0u;
 }
 
 /* re-run the schedule without a reboot: same compartments, current live
@@ -417,6 +458,24 @@ void supervisor_fault(uint32_t yuanyin, uint32_t zhi) {
     if (g_phase == 4) {
         atk_advance();
     } else if (g_phase >= 5) {
+        /* an evicted native compartment is the native program's one
+         * strike: restore the shadow (last-known-good) or fall back to
+         * the built-in blob on the next round */
+        if (cur_comp == 2u && g_nat_hot) {
+            uint32_t len = *(volatile uint32_t *)PROG_NSH;
+            if (len) {
+                memcpy((void *)NAT_TEXT, (void *)(PROG_NSH + 8u), len);
+                g_nat_len = len;
+                g_nat_entry = *(volatile uint32_t *)(PROG_NSH + 4u);
+                *(volatile uint32_t *)PROG_NSH = 0u;   /* one strike */
+            } else {
+                g_nat_hot = 0u;
+                g_nat_entry = 0u;
+                g_nat_len = (uint32_t)(_binary_native_demo_bin_end
+                                       - _binary_native_demo_bin_start);
+            }
+            STATUS[S_ROLL]++;
+        }
         native_done();               /* evicted native: nat2 stays 0 */
     } else {
         for (;;) heartbeat();        /* monitor fault: fail-stop */
