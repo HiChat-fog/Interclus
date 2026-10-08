@@ -5,7 +5,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: gcc -O2 -ffreestanding -o test_host tests/test_host.c core/ebpf.c core/helpers.c
+      - run: gcc -O2 -ffreestanding -o test_host tests/test_host.c core/ebpf.c core/helpers.c core/frame.c
       - run: ./test_host
   firmware-build:
     runs-on: ubuntu-latest
@@ -47,3 +47,5 @@ jobs:
           grep -q "== LOAD FAIL ==" urx_bad.log
           timeout 30 qemu-system-riscv32 -M virt -bios none -kernel build/fw_hot.elf -display none -serial stdio -monitor none < /dev/null | tee hot.log
           grep -q "== HOT PASS ==" hot.log
+          python3 tools/chan_qemu.py | tee chan.log
+          grep -q "== CHAN PASS ==" chan.log

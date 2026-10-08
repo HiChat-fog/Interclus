@@ -128,6 +128,21 @@ gates ever see it.
 
     python3 tools/uart_frame.py | qemu-system-riscv32 -M virt -bios none -kernel build/fw_urx.elf -display none -serial stdio -monitor none
 
+### Runtime channel
+
+After boot the console stays live. The service loop polls frames between
+rounds — no debugger needed: a type-2 frame commits a new swarm to the
+mailbox and the schedule re-runs against it; a type-1 frame installs a
+program through the hot-swap gates; type 3 stages a native module. Frames
+carry a checksum, so wire noise is dropped before anything commits, and a
+corrupted byte stream resyncs on the next frame. USART1 has no FIFO, so
+the poll loop runs tight; a frame lost mid-round is resent by the tool.
+
+```bash
+python3 tools/chan_qemu.py            # QEMU: five frames, == CHAN PASS ==
+python3 tools/uart_data.py 24         # board: live swarm over the wire
+```
+
 ## PMP semantics probe
 
 A dedicated probe firmware measures the core's PMP behavior and dumps raw
@@ -143,8 +158,8 @@ The last stage ends hung by design (misaligned-`mtvec` trap test); reflash
 
 ## Roadmap
 
-- [ ] UART data path to replace the debugger mailbox
-- [ ] Native module loading: time-multiplexed PMP compartments
+- [x] Runtime channel: data, eBPF, and native module frames over the console
+- [x] Native module loading: time-multiplexed PMP compartments
 - [ ] Support for other PMP-capable RISC-V MCUs
 
 ## Toolchain

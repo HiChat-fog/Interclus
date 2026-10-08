@@ -363,6 +363,59 @@ rej:
     PROG_PEND_OK[0] = 0u;
 }
 
+/* E21 runtime channel: one console frame per call, non-blocking. The
+ * assembler (core/frame.c) owns transport validity — checksum, bounds —
+ * so everything here arrived intact; this owns shape and policy:
+ *   type 1 — PROG image (boot layout): stages the PEND slot for
+ *            hot_swap, which runs the gates. Returns 2.
+ *   type 2 — mailbox image (magic, count, 42-byte packets): committed
+ *            after the shape check; the next round consumes it as if
+ *            the debugger had written it. Returns 1.
+ *   type 3 — native PEND image (len, kind, entry, code): staged
+ *            verbatim for hot_swap. Returns 2.
+ * Anything else is channel noise: dropped, the live state never moves. */
+static uint8_t g_chan_stage[8u + 42u * 64u]
+    __attribute__((section(".chan_stage")));
+
+static uint32_t le32(const uint8_t *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+int chan_poll(uart_frame_rx *rx) {
+    unsigned n = uart_poll_frame(g_chan_stage, sizeof g_chan_stage, rx);
+    if (!n) return 0;
+    if (rx->type == 1u) {
+        if (n < 8u || le32(g_chan_stage) != PROG_MAGIC) return 0;
+        uint32_t cnt = le32(g_chan_stage + 4u);
+        if (!cnt || cnt > IC_PROG_MAX_INSNS || n != 8u + cnt * 8u) return 0;
+        volatile uint32_t *pend = (volatile uint32_t *)PROG_PEND_ADDR;
+        volatile uint8_t *dst = (volatile uint8_t *)(PROG_PEND_ADDR + 8u);
+        pend[0] = cnt;
+        pend[1] = PEND_EBPF;
+        for (unsigned i = 0; i < n - 8u; i++) dst[i] = g_chan_stage[8u + i];
+        PROG_PEND_OK[0] = PROG_PEND_MAGIC;               /* lands last */
+        return 2;
+    }
+    if (rx->type == 2u) {
+        if (n < 12u) return 0;         /* magic + count + one packet */
+        uint32_t magic = le32(g_chan_stage), cnt = le32(g_chan_stage + 4u);
+        if (magic != MO_SHU || !cnt || cnt > MAX_SWARM ||
+            n != 8u + 42u * cnt) return 0;
+        for (unsigned i = 0; i < n; i++)
+            ((volatile uint8_t *)MAILBOX)[i] = g_chan_stage[i];
+        return 1;
+    }
+    if (rx->type == 3u) {
+        if (n < 12u || n > 0x200u) return 0;   /* PEND payload window */
+        volatile uint8_t *dst = (volatile uint8_t *)PROG_PEND_ADDR;
+        for (unsigned i = 0; i < n; i++) dst[i] = g_chan_stage[i];
+        PROG_PEND_OK[0] = PROG_PEND_MAGIC;               /* lands last */
+        return 2;
+    }
+    return 0;
+}
+
 /* re-run the schedule without a reboot: same compartments, current live
  * program. The box slots (live/shadow) persist; phase and forensics state
  * start clean. This is the runtime half of hot loading. */
@@ -433,17 +486,24 @@ static void native_done(void) {
     }
     uart_puts("\n");
     {
-        /* service loop: poll the staging area, and on a promotion re-run
-         * the whole schedule against the new program — the board stays
-         * live across swaps */
+        /* service loop: the console is a live channel now. Polled, no
+         * ISR, and USART1 has no FIFO — the loop must stay tight or the
+         * line outruns it (a 20k-nop heartbeat loses ~15 bytes at
+         * 115200). A data frame re-runs the schedule against the new
+         * swarm; a program frame stages PEND and hot_swap promotes it.
+         * The rx state resets on every re-entry: a round eats bytes
+         * anyway, so a half-received frame is corrupt by definition. */
         uint32_t seen = STATUS[S_HLOAD];
+        uart_frame_rx rx = { 0, 0, 0, 0, 0 };
         for (;;) {
+            int ev = chan_poll(&rx);
             hot_swap();
             if (STATUS[S_HLOAD] != seen) {
                 seen = STATUS[S_HLOAD];
                 hot_round();             /* noreturn: re-enters here */
             }
-            heartbeat();
+            if (ev == 1) hot_round();    /* new swarm committed */
+            STATUS[3]++;
         }
     }
 #endif

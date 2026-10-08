@@ -121,6 +121,19 @@ QEMU 那条跑的是同一条装载路径，收尾打印 `== LOAD PASS ==`。
 
     python3 tools/uart_frame.py | qemu-system-riscv32 -M virt -bios none -kernel build/fw_urx.elf -display none -serial stdio -monitor none
 
+### 运行时通道
+
+开机之后控制台保持在线。服务环在轮次之间轮询帧——不再依赖调试器：
+type-2 帧把新的蜂群提交进 mailbox，调度随即对新数据重跑；type-1 帧经
+热装载门换程序；type 3 暂存 native 模块。帧带校验和，线上噪声在任何
+提交之前就被丢弃，坏字节流会在下一帧重新同步。USART1 没有 FIFO，轮询
+环保持紧凑；轮次期间丢失的帧由工具重发。
+
+```bash
+python3 tools/chan_qemu.py            # QEMU：五帧，== CHAN PASS ==
+python3 tools/uart_data.py 24         # 板上：串口直灌蜂群
+```
+
 ## PMP 语义探针
 
 专门的探针固件测量这颗核的 PMP 行为，把原始证据倾倒进 SRAM：
@@ -135,8 +148,8 @@ wlink dump 0x20000100 400     # CSR 回读、fault 日志、U-mode 标记
 
 ## 路线图
 
-- [ ] UART 数据通道，取代调试器 mailbox
-- [ ] native 模块装载：PMP 舱室分时复用
+- [x] 运行时通道：数据、eBPF、native 模块帧走串口
+- [x] native 模块装载：PMP 舱室分时复用
 - [ ] 支持其他带 PMP 的 RISC-V MCU
 
 ## 工具链

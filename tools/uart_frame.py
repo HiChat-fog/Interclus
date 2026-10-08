@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Emit one console frame for the boot-time UART load: sync(7E 7E),
-type(1 = program), len16 LE, payload, sum8 (the checksum byte brings the
-sum of type..checksum to zero). The payload is a PROG image; the default
-mirrors modules/examples/pass_all.c. --corrupt flips one payload byte so
+"""Console frame builders plus the boot-time emitter. Frame: sync(7E 7E),
+type(1), len16 LE, payload, sum8 — the checksum byte brings the sum of
+type..payload to zero. Frame types: 1 = eBPF program (PROG layout, the
+boot window takes exactly one), 2 = mailbox image (runtime data frame),
+3 = native PEND image (runtime module install). The default emission
+mirrors modules/examples/pass_all.c; --corrupt flips one payload byte so
 the receiver must reject the frame."""
 import struct, sys
 
@@ -20,9 +22,19 @@ PASS_ALL = [
     enc(0x95, 0, 0, 0, 0),          # exit
 ]
 
-payload = (struct.pack("<II", 0x474F5250, len(PASS_ALL))
-           + b"".join(struct.pack("<Q", e) for e in PASS_ALL))
-if "--corrupt" in sys.argv:
-    payload = payload[:16] + bytes([payload[16] ^ 0xFF]) + payload[17:]
-body = bytes([1]) + struct.pack("<H", len(payload)) + payload
-sys.stdout.buffer.write(b"\x7E\x7E" + body + bytes([(-sum(body)) & 0xFF]))
+def frame(ftype, payload):
+    body = bytes([ftype]) + struct.pack("<H", len(payload)) + payload
+    return b"\x7E\x7E" + body + bytes([(-sum(body)) & 0xFF])
+
+def prog_payload(insns=PASS_ALL):
+    return (struct.pack("<II", 0x474F5250, len(insns))
+            + b"".join(struct.pack("<Q", e) for e in insns))
+
+def main():
+    payload = prog_payload()
+    if "--corrupt" in sys.argv:
+        payload = payload[:16] + bytes([payload[16] ^ 0xFF]) + payload[17:]
+    sys.stdout.buffer.write(frame(1, payload))
+
+if __name__ == "__main__":
+    main()

@@ -16,6 +16,8 @@ SECTIONS {
     compartment.o(.text .text.*)
     report.o(.text .text.*)
     uart.o(.text .text.*)
+    frame.o(.text .text.*)
+    chan_test.o(.text .text.*)
     main_pmp.o(.text .text.*)
     trap_pmp.o(.text .text.*)
     main_qemu.o(.rodata .rodata.*)
@@ -26,6 +28,8 @@ SECTIONS {
     compartment.o(.rodata .rodata.*)
     report.o(.rodata .rodata.*)
     uart.o(.rodata .rodata.*)
+    frame.o(.rodata .rodata.*)
+    chan_test.o(.rodata .rodata.*)
     main_pmp.o(.rodata .rodata.*)
     trap_pmp.o(.rodata .rodata.*)
     . = ALIGN(4);
@@ -40,6 +44,8 @@ SECTIONS {
     compartment.o(.data .data.*)
     report.o(.data .data.*)
     uart.o(.data .data.*)
+    frame.o(.data .data.*)
+    chan_test.o(.data .data.*)
     main_pmp.o(.data .data.*)
     trap_pmp.o(.data .data.*)
     . = ALIGN(4);
@@ -54,6 +60,8 @@ SECTIONS {
     compartment.o(.bss .bss.* COMMON)
     report.o(.bss .bss.* COMMON)
     uart.o(.bss .bss.* COMMON)
+    frame.o(.bss .bss.* COMMON)
+    chan_test.o(.bss .bss.* COMMON)
     main_pmp.o(.bss .bss.* COMMON)
     trap_pmp.o(.bss .bss.* COMMON)
     . = ALIGN(4);
@@ -72,6 +80,10 @@ SECTIONS {
   .trap_scratch 0x80010F00 (NOLOAD) : { KEEP(*(.trap_scratch)) } > RAM
 
   .mailbox 0x80011000 : { KEEP(*(.mailbox)) } > RAM
+
+  /* runtime channel staging (E21): after the mailbox, before the monitor
+   * window; islands stay strictly ascending (E15/E18) */
+  .chan_stage 0x80012000 (NOLOAD) : { KEEP(*(.chan_stage)) } > RAM
 
   .monitor_text 0x80100000 : {
     monitor.o(.text .text.* .monitor.text)

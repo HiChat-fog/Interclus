@@ -23,4 +23,24 @@ int  uart_getc(void);          /* -1 when the receiver is empty */
  * a fixed boot window, so silence costs the same every boot. */
 unsigned uart_recv(uint8_t *dst, unsigned cap);
 
+/* Persistent state of the frame assembler: phase machine plus the fields
+ * of the frame in flight. Caller-owned, survives across polls; a frame
+ * may arrive slower than one poll. */
+typedef struct {
+    unsigned phase, type, len, idx, sum;
+} uart_frame_rx;
+
+/* The wire rules as one pure byte step (core/frame.c); host tests drive
+ * it directly. Returns the payload length when a complete frame with a
+ * valid checksum just landed, 0 otherwise; the type is in st->type. */
+unsigned uart_frame_step(uint8_t byte, uint8_t *dst, unsigned cap,
+                         uart_frame_rx *st);
+
+/* Non-blocking drain of the console: consumes what has arrived into the
+ * assembler. Same return contract as uart_frame_step; 0 means nothing
+ * complete yet, never an error. The runtime channel polls this between
+ * rounds — USART1 has no FIFO, so callers must not idle between polls
+ * at line rate. */
+unsigned uart_poll_frame(uint8_t *dst, unsigned cap, uart_frame_rx *st);
+
 #endif

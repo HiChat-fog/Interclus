@@ -72,44 +72,26 @@ void uart_putdec(uint32_t v) {
 /* boot window for one console frame, in timer ticks (~100 ms at 10 MHz) */
 #define UART_WINDOW 1000000u
 
+unsigned uart_poll_frame(uint8_t *dst, unsigned cap, uart_frame_rx *st) {
+    for (;;) {
+        int c = uart_getc();
+        if (c < 0) return 0;
+        {
+            unsigned n = uart_frame_step((uint8_t)c, dst, cap, st);
+            if (n) return n;
+        }
+    }
+}
+
 unsigned uart_recv(uint8_t *dst, unsigned cap) {
+    uart_frame_rx st = { 0, 0, 0, 0, 0 };
     uint32_t t0 = TIMER_NOW();
-    unsigned phase = 0, type = 0, len = 0, idx = 0, sum = 0;
     for (;;) {
         if ((uint32_t)(TIMER_NOW() - t0) > UART_WINDOW) return 0;
         int c = uart_getc();
         if (c < 0) continue;
-        switch (phase) {
-        case 0:
-            phase = (c == 0x7E) ? 1u : 0u;
-            break;
-        case 1:
-            phase = (c == 0x7E) ? 2u : 0u;
-            break;
-        case 2:                                    /* type: 1 = program */
-            type = (unsigned)c;
-            sum = type;
-            phase = (type == 1u) ? 3u : 0u;
-            break;
-        case 3:
-            sum += (unsigned)c;
-            len = (unsigned)c;
-            phase = 4u;
-            break;
-        case 4:
-            sum += (unsigned)c;
-            len |= (unsigned)c << 8;
-            if (len > cap) return 0;
-            idx = 0;
-            phase = len ? 5u : 6u;
-            break;
-        case 5:
-            dst[idx++] = (uint8_t)c;
-            sum += (unsigned)c;
-            if (idx == len) phase = 6u;
-            break;
-        default:
-            return (((sum + (unsigned)c) & 0xFFu) == 0u) ? len : 0;
-        }
+        if (uart_frame_step((uint8_t)c, dst, cap, &st) && st.type == 1u)
+            return st.len;    /* the boot path takes program frames only;
+                                 anything else is channel traffic */
     }
 }

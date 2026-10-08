@@ -44,6 +44,9 @@ SECTIONS {
   .trap_scratch 0x20000F00 (NOLOAD) : {
     KEEP(*(.trap_scratch))
   }
+  /* runtime channel staging (E21): between the STATUS window and the
+   * trap scratch island; 2696 B, ends at 0x20000D88 */
+  .chan_stage 0x20000300 (NOLOAD) : { KEEP(*(.chan_stage)) }
   .comp_state 0x20000F40 (NOLOAD) : {
     __comp_start = .;
     KEEP(*(.comp_state))

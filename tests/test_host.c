@@ -11,6 +11,7 @@
 #include "../modules/examples/pass_all.c"
 #include "../modules/examples/rate_limit.h"
 #include "../core/loader.c"
+#include "../core/uart.h"
 #include "../core/contract.h"
 #include "../descriptions/demo.h"
 
@@ -241,6 +242,107 @@ int main(void) {
         check_desc("preflight: screening", ic_program_check(POLICY_CONFLICT, POLICY_CONFLICT_CNT), IC_OK);
         check_desc("preflight: pass-all", ic_program_check(pass_all_ins, pass_all_cnt), IC_OK);
         check_desc("preflight: rate-limit", ic_program_check(RATE_LIMIT, RATE_LIMIT_CNT), IC_OK);
+    }
+
+    /* frame machine (core/frame.c): the wire rules, no hardware */
+    {
+        uint8_t buf[64];
+        uart_frame_rx rx;
+        unsigned n;
+
+        /* helper frame: type 2, payload 11 22 33 44; the checksum byte
+         * brings the sum of type..payload to zero */
+        uint8_t good[10] = { 0x7E, 0x7E, 2, 4, 0, 0x11, 0x22, 0x33, 0x44, 0 };
+        unsigned sum = 0;
+        for (unsigned i = 2; i < 9; i++) sum += good[i];
+        good[9] = (uint8_t)(-sum);
+
+        /* type 1, one payload byte */
+        uint8_t good1[7] = { 0x7E, 0x7E, 1, 1, 0, 0xAB, 0 };
+        sum = 0;
+        for (unsigned i = 2; i < 6; i++) sum += good1[i];
+        good1[6] = (uint8_t)(-sum);
+
+        rx = (uart_frame_rx){ 0, 0, 0, 0, 0 };
+        n = 0;
+        for (unsigned i = 0; i < sizeof good; i++)
+            n = uart_frame_step(good[i], buf, sizeof buf, &rx);
+        printf("%-28s %s\n", "frame: whole frame in one go",
+               (n == 4 && rx.type == 2 && buf[0] == 0x11 && buf[3] == 0x44)
+               ? "PASS" : "FAIL");
+        if (!(n == 4 && rx.type == 2)) failures++;
+
+        /* byte-at-a-time across calls: partial state must survive */
+        rx = (uart_frame_rx){ 0, 0, 0, 0, 0 };
+        n = 0;
+        for (unsigned i = 0; i < sizeof good; i++) {
+            unsigned got = uart_frame_step(good[i], buf, sizeof buf, &rx);
+            if (i + 1u < sizeof good && got != 0) { n = (unsigned)-1; break; }
+            n = got;
+        }
+        printf("%-28s %s\n", "frame: split delivery",
+               (n == 4 && rx.phase == 0) ? "PASS" : "FAIL");
+        if (!(n == 4 && rx.phase == 0)) failures++;
+
+        /* bad checksum: dropped, machine resynced, next frame still lands */
+        rx = (uart_frame_rx){ 0, 0, 0, 0, 0 };
+        n = 0;
+        for (unsigned i = 0; i < sizeof good; i++)
+            n = uart_frame_step(i == 6 ? (uint8_t)(good[i] ^ 0xFF) : good[i],
+                                buf, sizeof buf, &rx);
+        if (n != 0 || rx.phase != 0) {
+            printf("%-28s %s\n", "frame: corrupt accepted", "FAIL");
+            failures++;
+        }
+        for (unsigned i = 0; i < sizeof good1; i++)
+            n = uart_frame_step(good1[i], buf, sizeof buf, &rx);
+        printf("%-28s %s\n", "frame: corrupt dropped, resync",
+               (n == 1 && rx.type == 1) ? "PASS" : "FAIL");
+        if (!(n == 1 && rx.type == 1)) failures++;
+
+        /* oversized length: dropped at the length phase, resync intact */
+        rx = (uart_frame_rx){ 0, 0, 0, 0, 0 };
+        {
+            static const uint8_t big[] = { 0x7E, 0x7E, 1, 0xFF, 0xFF, 0 };
+            for (unsigned i = 0; i < sizeof big; i++)
+                n = uart_frame_step(big[i], buf, sizeof buf, &rx);
+        }
+        for (unsigned i = 0; i < sizeof good1; i++)
+            n = uart_frame_step(good1[i], buf, sizeof buf, &rx);
+        printf("%-28s %s\n", "frame: oversized dropped, resync",
+               (n == 1 && rx.type == 1) ? "PASS" : "FAIL");
+        if (!(n == 1 && rx.type == 1)) failures++;
+
+        /* leading noise before the sync pair is ignored */
+        rx = (uart_frame_rx){ 0, 0, 0, 0, 0 };
+        n = 0;
+        {
+            static const uint8_t noisy[] = { 0x01, 0x02, 0x00, 0x7E, 0x01 };
+            for (unsigned i = 0; i < sizeof noisy; i++)
+                n = uart_frame_step(noisy[i], buf, sizeof buf, &rx);
+        }
+        for (unsigned i = 0; i < sizeof good1; i++)
+            n = uart_frame_step(good1[i], buf, sizeof buf, &rx);
+        printf("%-28s %s\n", "frame: leading noise ignored",
+               (n == 1 && rx.type == 1) ? "PASS" : "FAIL");
+        if (!(n == 1 && rx.type == 1)) failures++;
+
+        /* a sync pair inside the payload must not confuse the machine */
+        {
+            uint8_t tricky[10] = { 0x7E, 0x7E, 3, 4, 0,
+                                   0x7E, 0x7E, 1, 2, 0 };
+            sum = 0;
+            for (unsigned i = 2; i < 9; i++) sum += tricky[i];
+            tricky[9] = (uint8_t)(-sum);
+            rx = (uart_frame_rx){ 0, 0, 0, 0, 0 };
+            n = 0;
+            for (unsigned i = 0; i < sizeof tricky; i++)
+                n = uart_frame_step(tricky[i], buf, sizeof buf, &rx);
+            printf("%-28s %s\n", "frame: sync pair inside payload",
+                   (n == 4 && rx.type == 3 && buf[0] == 0x7E && buf[1] == 0x7E)
+                   ? "PASS" : "FAIL");
+            if (!(n == 4 && rx.type == 3)) failures++;
+        }
     }
 
     printf("\n%s (%d failures)\n", failures ? "!!! FAILURES" : "ALL PASS", failures);

@@ -39,23 +39,7 @@ def main():
     N = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 32
     seed = int(sys.argv[sys.argv.index("--seed") + 1]) if "--seed" in sys.argv else 7
     N = min(N, 64)
-    rng = random.Random(seed)
-    hotspots = [(20, 20), (60, 70), (80, 30)]
-    drones = []
-    for i in range(N):
-        if i < N * 2 // 3:
-            hx, hy = hotspots[i % 3]
-            x = min(99, max(0, hx + rng.randint(-3, 3)))
-            y = min(99, max(0, hy + rng.randint(-3, 3)))
-        else:
-            x, y = rng.randint(0, 99), rng.randint(0, 99)
-        drones.append((x, y))
-    pkts, cells = [], []
-    for i, (x, y) in enumerate(drones):
-        lat, lon = x * 10_000_000, y * 10_000_000
-        pkts.append(make_gpi(lat, lon, i))
-        cells.append(grid_cell(lat, lon))
-    expected = mirror(cells)
+    pkts, cells, expected = build_swarm(N, seed)
     alerts = sum(1 for e in expected if e == 5)
     blob = struct.pack("<II", MAILBOX_MAGIC, N) + b"".join(pkts)
     CHUNK = 2048
@@ -89,5 +73,26 @@ def main():
     print(f"host first-8 verdicts: {expected[:8]}")
     print("RESULT:", "MATCH ✅" if ok else "MISMATCH ❌")
     return 0 if ok else 1
+
+def build_swarm(n, seed=7):
+    """One deterministic swarm: packets, grid cells, and the mirrored
+    per-packet verdicts — the single source the debugger path and the
+    UART data frames both feed from."""
+    rng = random.Random(seed)
+    hotspots = [(20, 20), (60, 70), (80, 30)]
+    drones = []
+    for i in range(n):
+        if i < n * 2 // 3:
+            hx, hy = hotspots[i % 3]
+            x = min(99, max(0, hx + rng.randint(-3, 3)))
+            y = min(99, max(0, hy + rng.randint(-3, 3)))
+        else:
+            x, y = rng.randint(0, 99), rng.randint(0, 99)
+        drones.append((x, y))
+    pkts = [make_gpi(x * 10_000_000, y * 10_000_000, i)
+            for i, (x, y) in enumerate(drones)]
+    cells = [grid_cell(x * 10_000_000, y * 10_000_000) for x, y in drones]
+    return pkts, cells, mirror(cells)
+
 if __name__ == "__main__":
     sys.exit(main())
