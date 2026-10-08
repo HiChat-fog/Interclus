@@ -242,6 +242,76 @@ int main(void) {
         check_desc("preflight: screening", ic_program_check(POLICY_CONFLICT, POLICY_CONFLICT_CNT), IC_OK);
         check_desc("preflight: pass-all", ic_program_check(pass_all_ins, pass_all_cnt), IC_OK);
         check_desc("preflight: rate-limit", ic_program_check(RATE_LIMIT, RATE_LIMIT_CNT), IC_OK);
+
+        /* register gate: read-before-write is a load-time reject now.
+         * r2 is never written; the interpreter's zeroed register file
+         * must not be something a program can lean on. */
+        {
+            static const uint64_t unwritten[] = {
+                LDXB(0, 1, 0), ADD64(0, 2), EXIT()
+            };
+            check_desc("reggate: uninitialized read", ic_program_check(unwritten, 3), IC_ERR_VALIDATE);
+        }
+        {
+            /* one path writes r0, the other does not: the join must
+             * intersect, so the read after the join sees the written
+             * version only when both paths wrote it */
+            static const uint64_t join[] = {
+                LDXB(2, 1, 0),                       /* r2 = ctx[0] */
+                JEQ64I(2, 0xFD, 2),                  /* start byte == 0xFD? */
+                MOV64I(0, 0), EXIT(),                /* r0 = 0, exit */
+                MOV64I(0, 1),                        /* r0 = 1, fall through */
+                ADD64I(0, 0), EXIT()                 /* reads r0: ok on this path */
+            };
+            check_desc("reggate: joined path ok", ic_program_check(join, 7), IC_OK);
+            static const uint64_t join_bad[] = {
+                LDXB(2, 1, 0),
+                JEQ64I(2, 0xFD, 2),
+                MOV64I(0, 0), EXIT(),                /* writes r0 */
+                MOV64I(3, 1),                        /* writes r3, NOT r0 */
+                ADD64I(0, 3), EXIT()                 /* reads r0: one path never wrote it */
+            };
+            check_desc("reggate: join must intersect", ic_program_check(join_bad, 7), IC_ERR_VALIDATE);
+            /* the taken edge reaches EXIT straight past the write: r0 is
+             * uninitialized on that path even though the fall-through
+             * wrote it — the join already said no */
+            static const uint64_t edge_exit[] = {
+                LDXB(2, 1, 0),
+                JEQ64I(2, 0xFD, 1),                  /* taken: straight to EXIT */
+                MOV64I(0, 1),                        /* writes r0, fall-through */
+                EXIT()                               /* reads r0: taken path never wrote it */
+            };
+            check_desc("reggate: taken edge past the write", ic_program_check(edge_exit, 4), IC_ERR_VALIDATE);
+        }
+        {
+            /* division by an immediate zero dies at load, not at run */
+            static const uint64_t divz[] = { MOV64I(2, 5), EBPF_ENC(0x37, 2, 0, 0, 0), EXIT() };
+            check_desc("reggate: div by imm 0", ic_program_check(divz, 3), IC_ERR_VALIDATE);
+            static const uint64_t modz[] = { MOV64I(2, 5), EBPF_ENC(0x97, 2, 0, 0, 0), EXIT() };
+            check_desc("reggate: mod by imm 0", ic_program_check(modz, 3), IC_ERR_VALIDATE);
+            /* register-zero divisor stays a run-time fault (unverifiable) */
+            static const uint64_t divr[] = { MOV64I(2, 5), MOV64I(3, 0), DIV64(2, 3), MOV64I(0, 1), EXIT() };
+            check_desc("reggate: div by reg stays runtime", ic_program_check(divr, 5), IC_OK);
+        }
+        {
+            /* control falling off the image is a run-time PC fault;
+             * the fall-through successor past the end is now rejected */
+            static const uint64_t falloff[] = { LDXB(2, 1, 0), JEQ64I(2, 0xFD, 0), MOV64I(0, 1) };
+            check_desc("reggate: fall off the image", ic_program_check(falloff, 3), IC_ERR_VALIDATE);
+            /* the taken jump may point at the last insn — legal when the
+             * register EXIT reads was written on every path reaching it */
+            static const uint64_t backok[] = { MOV64I(0, 1), JEQ64I(0, 1, 0), EXIT() };
+            check_desc("reggate: jump to last insn ok", ic_program_check(backok, 3), IC_OK);
+        }
+        {
+            /* calls read r1 (helper 1) or r1+r2 (helper 2), write r0 */
+            static const uint64_t call1[] = { MOV64I(1, 0), CALL(1), JEQ64I(0, 0, 1), MOV64I(0, 1), EXIT() };
+            check_desc("reggate: call defs r0", ic_program_check(call1, 5), IC_OK);
+            static const uint64_t call2[] = { MOV64I(1, 0), CALL(2), EXIT() };
+            check_desc("reggate: helper 2 needs r2", ic_program_check(call2, 3), IC_ERR_VALIDATE);
+            static const uint64_t call2ok[] = { MOV64I(1, 0), MOV64I(2, 1), CALL(2), EXIT() };
+            check_desc("reggate: helper 2 satisfied", ic_program_check(call2ok, 4), IC_OK);
+        }
     }
 
     /* frame machine (core/frame.c): the wire rules, no hardware */

@@ -6,6 +6,7 @@
  * Round 1: pass_all loaded at boot, verdicts [1 1 0 1 1 1].
  * Round 2: pass_all rejected (bad opcode), mov-to-r10 promoted — it is
  *          static-legal on purpose (the verifier allows r10 as dst; the
+ *          program itself is well-formed with a proper exit; the
  *          interpreter faults FP at run) — the round faults, the
  *          supervisor rolls back to the shadow.
  * Round 3: pass_all restored from the shadow, verdicts return. */
@@ -26,7 +27,12 @@ void qemu_exit(int code);
 
 static const uint32_t want[6] = { 1, 1, 0, 1, 1, 1 };
 static const uint64_t badstat_ins[] = { 0xdeadbeefdeadbeefULL };
-static const uint64_t badrun_ins[] = { EBPF_ENC(0xb7, 10, 0, 0, 1) };
+/* static-legal, run-time fatal: writes r10 (allowed by the verifier, FP
+ * fault at run), then exits properly — the register gate demands the
+ * well-formed tail */
+static const uint64_t badrun_ins[] = { EBPF_ENC(0xb7, 10, 0, 0, 1),
+                                       EBPF_ENC(0xb7, 0, 0, 0, 1),
+                                       EBPF_ENC(0x95, 0, 0, 0, 0) };
 
 static volatile unsigned state;
 
@@ -81,9 +87,9 @@ void sweep_next(void) {
         hot_swap();
         if (STATUS[S_HREJ] != 1u || STATUS[S_HLOAD] != 0u ||
             MON_PROG_CNT[0] != pass_all_cnt) ok = 0;
-        stage_pend(PROG_PEND_ADDR, badrun_ins, 1u);
+        stage_pend(PROG_PEND_ADDR, badrun_ins, 3u);
         hot_swap();
-        if (STATUS[S_HLOAD] != 1u || MON_PROG_CNT[0] != 1u ||
+        if (STATUS[S_HLOAD] != 1u || MON_PROG_CNT[0] != 3u ||
             MON_PROG_B_CNT[0] != pass_all_cnt) ok = 0;
     } else if (state == 1) {
         state = 2;

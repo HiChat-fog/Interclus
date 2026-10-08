@@ -10,8 +10,10 @@
 #define IC_PROG_MAX_INSNS 64u
 
 /* Static preflight for a program about to run on the interpreter: length,
- * known opcodes, register range, in-bounds jumps, known helpers. Shape
- * checks only, no register typing; memory safety stays at run time. */
+ * known opcodes, register range, in-bounds jumps, known helpers, plus a
+ * register dataflow pass — every register written before read (r1 = ctx
+ * at entry), no division by an immediate zero, control never falls off
+ * the image. Memory safety stays at run time. */
 ic_status ic_program_check(const uint64_t *ins, uint32_t cnt);
 
 #endif
