@@ -1,8 +1,15 @@
 """Board hot-swap drill: no reset between steps — the running service loop
 must pick up each staged image from PROG_PEND within a heartbeat cycle.
-  1. clean boot (built-in policy)          verdicts [1 1 0 2 3 4], HLOAD 0
-  2. stage pass_all  -> promoted live      verdicts [1 1 0 1 1 1], HLOAD 1
-  3. stage mov-to-r10 -> fault -> rollback verdicts [1 1 0 1 1 1], HLOAD 2, ROLL 1
+  1. clean boot (built-in policy)            verdicts [1 1 0 2 3 4], HLOAD 0
+  2. stage pass_all  -> promoted live        verdicts [1 1 0 1 1 1], HLOAD 1
+  3. stage mov-to-r10 -> fault -> rollback   verdicts zeros, HLOAD 2, ROLL 1
+  4. stage pass_all again -> verdicts return HLOAD 3
+  5. variant into slot 0 (remap drill)       HLOAD 4, NSLOT 0, NAT2 ...0003
+  6. fetch-fault into slot 1 -> evicted,     HLOAD 5, ROLL 2, NAT2 0,
+     boundary remapped to slot 0             NSLOT 0
+  7. slot-1 variant revives slot 1           HLOAD 6, NSLOT 1, NAT2 ...0003
+  8. fetch-fault into slot 0 -> evicted,     HLOAD 7, ROLL 3, NAT2 0,
+     boundary remapped to slot 1             NSLOT 1
 Status words are addressed as STATUS_BASE + 4*word_index (S_* in
 platform.h are word indices)."""
 import struct, sys, time
@@ -14,7 +21,9 @@ BASE = 0x20000100                 # STATUS
 PEND_MAGIC = 0x444E4550
 PEND_EBPF = 1
 PEND_NATIVE = 2
-BADRUN = [enc(0xB7, 10, 0, 0, 1)] # static-legal, interpreter faults FP at run
+# static-legal, interpreter faults FP at run (register gate demands the
+# well-formed tail)
+BADRUN = [enc(0xB7, 10, 0, 0, 1), enc(0xB7, 0, 0, 0, 1), enc(0x95, 0, 0, 0, 0)]
 
 def stage(insns):
     # magic-last layout (platform.h PROG_PEND). Staged word-by-word via
@@ -30,24 +39,30 @@ def stage(insns):
         wlink("write-mem", hex(PROG_PEND + 8 + 8 * i + 4), hex(hi))
     wlink("write-mem", hex(PROG_PEND + 0x208), hex(PEND_MAGIC))
 
-def stage_native(code, entry=0):
-    # kind 2 image: [0]=len, [4]=kind, [8]=entry, code at +12, magic last
-    blob = struct.pack("<III", len(code), PEND_NATIVE, entry) + code
+def stage_native(code, entry=0, slot=0):
+    # kind 2 image: [0]=len, [4]=kind, [8]=entry, [12]=slot, code at +16
+    blob = struct.pack("<IIII", len(code), PEND_NATIVE, entry, slot) + code
     wlink("write-mem", hex(PROG_PEND), hex(len(code)))
     wlink("write-mem", hex(PROG_PEND + 4), hex(PEND_NATIVE))
     wlink("write-mem", hex(PROG_PEND + 8), hex(entry))
-    for i in range(0, len(blob) - 12, 4):
-        word = struct.unpack_from("<I", blob, 12 + i)[0]
-        wlink("write-mem", hex(PROG_PEND + 12 + i), hex(word))
+    wlink("write-mem", hex(PROG_PEND + 12), hex(slot))
+    for i in range(0, len(blob) - 16, 4):
+        word = struct.unpack_from("<I", blob, 16 + i)[0]
+        wlink("write-mem", hex(PROG_PEND + 16 + i), hex(word))
     wlink("write-mem", hex(PROG_PEND + 0x208), hex(PEND_MAGIC))
 
-NATVAR = open("../build/native_variant.bin", "rb").read()
+NATVAR = open("../build/native_variant.bin", "rb").read()       # slot 0
+NATVAR_S1 = open("../build/native_variant_s1.bin", "rb").read() # slot 1
 BADNAT = bytearray(NATVAR)
 BADNAT[0:8] = struct.pack("<II", 0x00000297, 0x10028067)  # auipc; jalr +0x1000
+
+S_NAT2, S_REMAP, S_NSLOT = 92, 96, 97
 
 def snap():
     w = read_words(BASE + 4 * 16, 6)     # S_CAIJUE..S_CAIJUE+5
     w.update(read_words(BASE + 4 * 88, 8))   # S_GATE..S_ROLL
+    w.update(read_words(BASE + 4 * S_REMAP, 2))  # S_REMAP, S_NSLOT
+    w.update(read_words(BASE + 4 * S_NAT2, 1))
     return (w, [w.get(BASE + 4 * (16 + i)) for i in range(6)],
             w.get(BASE + 4 * 88), w.get(BASE + 4 * 89),
             w.get(BASE + 4 * 93), w.get(BASE + 4 * 94), w.get(BASE + 4 * 95))
@@ -100,29 +115,38 @@ def main():
                               lambda v, hl, hr, ro: hl == 3)
     ok &= v3 == [1, 1, 0, 1, 1, 1] and h3 == 3 and r3 == 1
 
-    # native hot path: variant module (proof 0xC0DE0003) replaces the
-    # built-in demo, then a fetch-fault image gets evicted + rolled back,
-    # then the variant returns
+    # native slot table: variant into slot 0 (the install remaps the exec
+    # window and runs the remap drill), then a fetch-fault image into
+    # slot 1 gets evicted with the boundary remapping back, then slot 1
+    # is revived with its own good variant, then slot 0 is poisoned too
     stage_native(NATVAR)
-    v4, h4, _, r4 = wait_step("5 native variant live",
+    v4, h4, _, r4 = wait_step("5 native variant slot0",
                               lambda v, hl, hr, ro: hl == 4)
+    w = snap()[0]
     ok &= v4 == [1, 1, 0, 1, 1, 1] and h4 == 4 and r4 == 1
-    w = read_words(BASE + 4 * 92, 1)[BASE + 4 * 92]
-    ok &= w == 0xC0DE0003
+    ok &= w.get(BASE + 4 * S_NSLOT) == 0 and w.get(BASE + 4 * S_NAT2) == 0xC0DE0003
+    ok &= 0 < (w.get(BASE + 4 * S_REMAP) or 0) < 10000
 
-    stage_native(BADNAT)
-    v5, h5, _, r5 = wait_step("6 native fault+rollback",
+    stage_native(BADNAT, slot=1)
+    v5, h5, _, r5 = wait_step("6 native fault+remap",
                               lambda v, hl, hr, ro: ro == 2)
-    ok &= v5 == [1, 1, 0, 1, 1, 1] and h5 == 5 and r5 == 2
-    w = read_words(BASE + 4 * 92, 1)[BASE + 4 * 92]
-    ok &= w == 0
+    w = snap()[0]
+    ok &= h5 == 5 and r5 == 2
+    ok &= w.get(BASE + 4 * S_NSLOT) == 0 and w.get(BASE + 4 * S_NAT2) == 0
 
-    stage_native(NATVAR)
-    v6, h6, _, r6 = wait_step("7 native variant back",
+    stage_native(NATVAR_S1, slot=1)
+    v6, h6, _, r6 = wait_step("7 slot1 variant live",
                               lambda v, hl, hr, ro: hl == 6)
-    ok &= v6 == [1, 1, 0, 1, 1, 1] and h6 == 6 and r6 == 2
-    w = read_words(BASE + 4 * 92, 1)[BASE + 4 * 92]
-    ok &= w == 0xC0DE0003
+    w = snap()[0]
+    ok &= v6 == [1, 1, 0, 1, 1, 1] and h6 == 6
+    ok &= w.get(BASE + 4 * S_NSLOT) == 1 and w.get(BASE + 4 * S_NAT2) == 0xC0DE0003
+
+    stage_native(BADNAT, slot=0)
+    v7, h7, _, r7 = wait_step("8 slot0 fault+remap",
+                              lambda v, hl, hr, ro: ro == 3)
+    w = snap()[0]
+    ok &= h7 == 7 and r7 == 3
+    ok &= w.get(BASE + 4 * S_NSLOT) == 1 and w.get(BASE + 4 * S_NAT2) == 0
 
     print("RESULT:", "HOT BOARD PASS ✅" if ok else "HOT BOARD FAIL ❌")
     return 0 if ok else 1

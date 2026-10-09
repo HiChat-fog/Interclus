@@ -23,6 +23,10 @@ $CC -c ../modules/examples/native_variant.c -o native_variant.o -DNAT_SRAM_BASE=
 $LLD -flavor gnu -T ../modules/native.ld --defsym NAT_TEXT_BASE=0x2000A000 \
     -nostdlib -o native_variant.elf native_variant.o
 riscv64-unknown-elf-objcopy -O binary --only-section=.text native_variant.elf native_variant.bin
+$CC -c ../modules/examples/native_variant.c -o native_variant_s1.o -DNAT_SRAM_BASE=0x2000D000
+$LLD -flavor gnu -T ../modules/native.ld --defsym NAT_TEXT_BASE=0x2000C000 \
+    -nostdlib -o native_variant_s1.elf native_variant_s1.o
+riscv64-unknown-elf-objcopy -O binary --only-section=.text native_variant_s1.elf native_variant_s1.bin
 riscv64-unknown-elf-objcopy -I binary -O elf32-littleriscv -B riscv \
     --rename-section .data=.native_blob,alloc,load,readonly,contents \
     native_demo.bin native_blob.o

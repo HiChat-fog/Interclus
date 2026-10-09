@@ -5,8 +5,10 @@
 #ifdef QEMU_TARGET
 
 #define MON_TEXT   0x80100000u
-#define NAT_TEXT   0x80210000u   /* native compartment slot (RAM, exec) */
+#define NAT_TEXT   0x80210000u   /* native compartment slot 0 (RAM, exec) */
 #define NAT_SRAM   0x80211000u
+#define NAT2_TEXT  0x80212000u   /* native compartment slot 1 */
+#define NAT2_SRAM  0x80213000u
 #define ATK_TEXT   0x80102000u
 #define MON_BOX    0x80200000u
 #define ATK_BOX    0x80208000u
@@ -24,10 +26,12 @@
 
 #else
 
-#define MON_TEXT   0x08002000u
-#define NAT_TEXT   0x2000A000u   /* native compartment slot (RAM, exec) */
+#define MON_TEXT   0x08003000u
+#define NAT_TEXT   0x2000A000u   /* native compartment slot 0 (RAM, exec) */
 #define NAT_SRAM   0x2000B000u
-#define ATK_TEXT   0x08004000u
+#define NAT2_TEXT  0x2000C000u   /* native compartment slot 1 */
+#define NAT2_SRAM  0x2000D000u
+#define ATK_TEXT   0x08006000u
 #define MON_BOX    0x20004000u
 #define ATK_BOX    0x20008000u
 #define SUP_STACK  0x20003F00u
@@ -82,15 +86,13 @@
  * half-written image. hot_swap consumes the image by clearing the magic.
  * Word 1 picks the kind: an eBPF program (word 0 = insn count, payload =
  * insns) or a native module (word 0 = code bytes, word 2 = entry offset,
- * payload = raw code) — both capped by the 512-byte payload window. */
+ * word 3 = slot index, payload = raw code linked for that slot's base) —
+ * both capped by the payload window. */
 #define PROG_PEND_ADDR  (PROG_AREA + 0x800u)
 #define PROG_PEND_MAGIC 0x444E4550u   /* "PEND" */
 #define PROG_PEND_OK    ((volatile uint32_t *)(PROG_PEND_ADDR + 0x208u))
 #define PEND_EBPF       1u
 #define PEND_NATIVE     2u
-
-/* native hot-load shadow (last-known-good): [0]=len, [4]=entry, [8..]=code */
-#define PROG_NSH        (PROG_AREA + 0xC00u)
 
 /* attacker-box slots */
 #define ATK_OWN      ((volatile uint32_t *)(ATK_BOX + 0x0u))
@@ -123,6 +125,9 @@
 #define S_HLOAD   93u   /* hot swaps promoted through the gates */
 #define S_HREJ    94u   /* hot swaps rejected by the gates */
 #define S_ROLL    95u   /* runtime rollbacks to last-known-good */
+#define S_REMAP   96u   /* native slot remap drill: STK ticks for the
+                         PMP-pair rewrite onto a different base */
+#define S_NSLOT   97u   /* native slot table: index wired into comp 2 */
 
 /* PMP NAPOT encodings, derived from the map */
 #define NAPOT(base, size) (((base) >> 2) | ((size) >> 3) - 1u)

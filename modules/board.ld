@@ -11,12 +11,12 @@ SECTIONS {
     *(EXCLUDE_FILE(monitor.o attacker.o) .rodata .rodata.*)
     . = ALIGN(4);
   } > FLASH
-  .monitor_text 0x08002000 : {
+  .monitor_text 0x08003000 : {
     KEEP(monitor.o(.text .text.* .monitor.text))
     KEEP(monitor.o(.rodata .rodata.*))
     . = ALIGN(4);
   } > FLASH
-  .attacker_text 0x08004000 : {
+  .attacker_text 0x08006000 : {
     KEEP(attacker.o(.text .text.* .attacker.text))
     KEEP(attacker.o(.rodata .rodata.*))
     . = ALIGN(4);
@@ -56,7 +56,7 @@ SECTIONS {
   .meas_res 0x20001900 (NOLOAD) : {
     KEEP(*(.meas_res))
   }
-  ASSERT(SIZEOF(.text) <= 0x2000, "supervisor .text overflows the monitor window")
+  ASSERT(SIZEOF(.text) <= 0x2800, "supervisor .text overflows the supervisor window")
   ASSERT(SIZEOF(.monitor_text) <= 0x2000, "monitor text overflows its window")
   _stack_top     = 0x20003F00;  
   _sup_stack_top = 0x20003F00;  

@@ -40,10 +40,21 @@ static volatile uint32_t g_alerts = 0;
 static volatile uint32_t g_conflict_n = 0;
 static volatile uint32_t g_source = 0;
 static volatile uint32_t g_atk_vec = 0;   /* attacker lifetime in flight */
-static uint32_t g_nat_len;                /* live native image bytes */
-static uint32_t g_nat_entry;              /* its entry offset */
-static uint32_t g_nat_hot;                /* 1 once a hot image replaced
-                                             the built-in demo blob */
+
+/* E22 native slot table: two resident modules, one PMP exec window. The
+ * schedule boundary remaps the window onto whichever entry is live; a
+ * faulting slot is evicted in the table and the boundary remaps to the
+ * other one (its image is the last-known-good module). Both dead means
+ * the native phase retires for the session — the schedule continues. */
+struct nat_slot {
+    uint32_t len;      /* image bytes in the slot, 0 = empty */
+    uint32_t entry;    /* entry offset into the slot */
+    uint32_t valid;    /* an image has been installed */
+    uint32_t evicted;  /* v1.1: faulted once, never scheduled again */
+};
+static struct nat_slot g_nat[2];
+static uint32_t g_nat_live;     /* slot index wired into compartment 2 */
+static uint32_t g_nat_retired;  /* no runnable native slot left */
 
 extern const uint8_t _binary_native_demo_bin_start[];
 extern const uint8_t _binary_native_demo_bin_end[];
@@ -51,6 +62,15 @@ extern const uint8_t _binary_native_demo_bin_end[];
 static void enter_checked(unsigned i);
 static void schedule_round(void);
 static void heartbeat(void);
+static void native_done(uint32_t proof);
+
+/* the spec of native slot k, straight from the map */
+static void nat_spec(uint32_t k, ic_compartment_spec *s) {
+    s->text_base = k ? NAT2_TEXT : NAT_TEXT;
+    s->text_size = 0x1000u;
+    s->sram_base = k ? NAT2_SRAM : NAT_SRAM;
+    s->sram_size = 0x1000u;
+}
 
 __attribute__((noinline))
 static void heartbeat(void) {
@@ -96,8 +116,12 @@ static uint32_t boot_gate(void) {
     if (ic_compartment_check(&ic_comp_native) != IC_OK) return 9u;
     if (ic_module_check(&ic_module_nativedemo) != IC_OK) return 10u;
     {
-        const ic_compartment_spec nat = { NAT_TEXT, 0x1000u, NAT_SRAM, 0x1000u };
+        /* the generated spec pins slot 0; slot 1 is derived from the map */
+        ic_compartment_spec nat, nat2;
+        nat_spec(0u, &nat);
+        nat_spec(1u, &nat2);
         if (!spec_match(&ic_comp_native, &nat)) return 11u;
+        if (ic_compartment_check(&nat2) != IC_OK) return 12u;
     }
     return 0u;
 }
@@ -209,10 +233,21 @@ void boot_main(void) {
     uart_load();
     load_program();
 
-    g_nat_len = (uint32_t)(_binary_native_demo_bin_end
-                           - _binary_native_demo_bin_start);
-    g_nat_entry = 0u;
-    g_nat_hot = 0u;              /* a boot serves the built-in blob */
+    {   /* slot 0 serves the built-in demo blob; the bytes land once —
+           U-mode cannot write its own text (PMP R/X), and the rollback
+           path remaps instead of restoring bytes */
+        g_nat[0].len = (uint32_t)(_binary_native_demo_bin_end
+                                  - _binary_native_demo_bin_start);
+        memcpy((void *)NAT_TEXT, _binary_native_demo_bin_start,
+               g_nat[0].len);
+        g_nat[0].entry = 0u;
+        g_nat[0].valid = 1u;
+        g_nat[0].evicted = 0u;
+        g_nat[1].len = 0u; g_nat[1].entry = 0u;
+        g_nat[1].valid = 0u; g_nat[1].evicted = 0u;
+        g_nat_live = 0u;
+        g_nat_retired = 0u;
+    }
 
     csr_write(0x305, (uint32_t)trap_entry);
     schedule_round();
@@ -273,14 +308,14 @@ static void schedule_round(void) {
 
     compartment_set(0u, &ic_comp_monitor, (uint32_t)monitor_entry - MON_TEXT);
     compartment_set(1u, &ic_comp_attacker, (uint32_t)attacker_entry - ATK_TEXT);
-    compartment_set(2u, &ic_comp_native, g_nat_entry);
-    if (!g_nat_hot) {
-        const uint8_t *src = _binary_native_demo_bin_start;
-        volatile uint8_t *dst = (volatile uint8_t *)NAT_TEXT;
-        while (src < _binary_native_demo_bin_end) *dst++ = *src++;
-    }   /* a hot-loaded native image stays in the slot across rounds */
-    *(volatile uint32_t *)NAT_SRAM = 0u;   /* fresh proof each round:
-                                              an evicted native reads as 0 */
+    {   /* the native window follows the live table entry: the next
+           compartment_arm rewrites the PMP pair onto that slot's base —
+           the schedule-boundary remap (S_REMAP pins its cost) */
+        ic_compartment_spec s;
+        nat_spec(g_nat_live, &s);
+        compartment_set(2u, &s, g_nat[g_nat_live].entry);
+        *(volatile uint32_t *)(g_nat_live ? NAT2_SRAM : NAT_SRAM) = 0u;
+    }
     compartment_arm(0u);
     g_phase = 1;
     MON_MODE[0] = 0u;
@@ -319,21 +354,35 @@ void hot_swap(void) {
     kind = pend[1];
     if (kind == PEND_NATIVE) {
         uint32_t entry = pend[2];
+        uint32_t slot = pend[3];
         ic_module_desc d;
-        if (!w0 || w0 > 0x1F0u || (entry & 1u) || entry >= 0x1000u) goto rej;
+        ic_compartment_spec s;
+        if (!w0 || w0 > 0x1F0u || (entry & 1u) || entry >= 0x1000u ||
+            slot > 1u) goto rej;
+        nat_spec(slot, &s);
         d.magic = IC_MODULE_MAGIC; d.contract_ver = IC_CONTRACT_VERSION;
-        d.kind = IC_MODULE_NATIVE; d.text_base = NAT_TEXT; d.text_size = 0x1000u;
-        d.sram_base = NAT_SRAM; d.sram_size = 0x1000u;
+        d.kind = IC_MODULE_NATIVE; d.text_base = s.text_base;
+        d.text_size = 0x1000u;
+        d.sram_base = s.sram_base; d.sram_size = 0x1000u;
         d.entry_offset = entry; d.reserved = 0u;
         if (ic_module_check(&d) != IC_OK) goto rej;
-        *(volatile uint32_t *)PROG_NSH = g_nat_len;          /* shadow live */
-        *(volatile uint32_t *)(PROG_NSH + 4u) = g_nat_entry;
-        memcpy((void *)(PROG_NSH + 8u), (void *)NAT_TEXT, g_nat_len);
-        memcpy((void *)NAT_TEXT,
-               (const void *)(PROG_PEND_ADDR + 12u), w0);   /* staged -> live */
-        g_nat_len = w0;
-        g_nat_entry = entry;
-        g_nat_hot = 1u;
+        memcpy((void *)s.text_base,
+               (const void *)(PROG_PEND_ADDR + 16u), w0);  /* staged -> slot */
+        g_nat[slot].len = w0;
+        g_nat[slot].entry = entry;
+        g_nat[slot].valid = 1u;
+        g_nat[slot].evicted = 0u;      /* an install is a fresh lifetime */
+        g_nat_live = slot;
+        g_nat_retired = 0u;
+        STATUS[S_NSLOT] = slot;        /* visible immediately, not only at
+                                          the next phase boundary */
+        {   /* remap drill: rewrite the exec pair onto the new base now —
+             * the same CSR sequence the schedule boundary repeats */
+            uint32_t t0 = TIMER_NOW();
+            compartment_set(2u, &s, entry);
+            compartment_arm(2u);
+            STATUS[S_REMAP] = TIMER_NOW() - t0;
+        }
     } else if (kind == PEND_EBPF) {
         volatile uint64_t *s = (volatile uint64_t *)(PROG_PEND_ADDR + 8u);
         ic_module_desc d;
@@ -371,7 +420,7 @@ rej:
  *   type 2 — mailbox image (magic, count, 42-byte packets): committed
  *            after the shape check; the next round consumes it as if
  *            the debugger had written it. Returns 1.
- *   type 3 — native PEND image (len, kind, entry, code): staged
+ *   type 3 — native PEND image (len, kind, entry, slot, code): staged
  *            verbatim for hot_swap. Returns 2.
  * Anything else is channel noise: dropped, the live state never moves. */
 static uint8_t g_chan_stage[8u + 42u * 64u]
@@ -407,7 +456,7 @@ int chan_poll(uart_frame_rx *rx) {
         return 1;
     }
     if (rx->type == 3u) {
-        if (n < 12u || n > 0x200u) return 0;   /* PEND payload window */
+        if (n < 16u || n > 0x200u) return 0;   /* PEND payload window */
         volatile uint8_t *dst = (volatile uint8_t *)PROG_PEND_ADDR;
         for (unsigned i = 0; i < n; i++) dst[i] = g_chan_stage[i];
         PROG_PEND_OK[0] = PROG_PEND_MAGIC;               /* lands last */
@@ -467,12 +516,22 @@ static void atk_advance(void) {
         STATUS[S_LOG0C + 1 + i * 2] = g_ri_addr[i];
     }
     STATUS[S_NAT2] = 0u;
+    if (g_nat_retired || !g_nat[g_nat_live].valid ||
+        g_nat[g_nat_live].evicted) {
+        /* no runnable native slot: the phase retires this session —
+         * the schedule continues without it (Tock-style, no collateral) */
+        STATUS[S_NSLOT] = 0xFFFFFFFFu;
+        native_done(0u);
+        return;
+    }
+    STATUS[S_NSLOT] = g_nat_live;
     g_phase = 5;
     enter_checked(2u);
 }
 
-static void native_done(void) {
-    STATUS[S_NAT2] = *(volatile uint32_t *)NAT_SRAM;
+static void native_done(uint32_t proof) {
+    STATUS[S_NAT2] = proof ? *(volatile uint32_t *)
+        (g_nat_live ? NAT2_SRAM : NAT_SRAM) : 0u;
     STATUS[S_DONE] = 0x600DF00Du;
 
 #ifdef QEMU_TARGET
@@ -518,25 +577,28 @@ void supervisor_fault(uint32_t yuanyin, uint32_t zhi) {
     if (g_phase == 4) {
         atk_advance();
     } else if (g_phase >= 5) {
-        /* an evicted native compartment is the native program's one
-         * strike: restore the shadow (last-known-good) or fall back to
-         * the built-in blob on the next round */
-        if (cur_comp == 2u && g_nat_hot) {
-            uint32_t len = *(volatile uint32_t *)PROG_NSH;
-            if (len) {
-                memcpy((void *)NAT_TEXT, (void *)(PROG_NSH + 8u), len);
-                g_nat_len = len;
-                g_nat_entry = *(volatile uint32_t *)(PROG_NSH + 4u);
-                *(volatile uint32_t *)PROG_NSH = 0u;   /* one strike */
+        /* an evicted native compartment is that slot's one strike: the
+         * rollback is the remap — the schedule boundary moves the PMP
+         * window onto the other entry (its resident image is the
+         * last-known-good module). No bytes are restored; both slots
+         * dead retires the native phase for the session. The evicted
+         * round produces no proof (S_NAT2 reads zero), and the remap
+         * counts as a rollback to last-known-good. */
+        if (cur_comp == 2u) {
+            uint32_t dead = g_nat_live;
+            uint32_t other = dead ^ 1u;
+            g_nat[dead].evicted = 1u;
+            STATUS[S_NAT2] = 0u;
+            if (g_nat[other].valid && !g_nat[other].evicted) {
+                g_nat_live = other;
+                g_nat_retired = 0u;
+                STATUS[S_ROLL]++;
             } else {
-                g_nat_hot = 0u;
-                g_nat_entry = 0u;
-                g_nat_len = (uint32_t)(_binary_native_demo_bin_end
-                                       - _binary_native_demo_bin_start);
+                g_nat_retired = 1u;      /* schedule keeps running */
             }
-            STATUS[S_ROLL]++;
+            STATUS[S_NSLOT] = g_nat_retired ? 0xFFFFFFFFu : g_nat_live;
         }
-        native_done();               /* evicted native: nat2 stays 0 */
+        native_done(0u);             /* evicted native: nat2 stays 0 */
     } else {
         for (;;) heartbeat();        /* monitor fault: fail-stop */
     }
@@ -605,6 +667,6 @@ void supervisor_resume(void) {
     } else if (g_phase == 4) {             /* an attacker lifetime yielded */
         atk_advance();
     } else {
-        native_done();
+        native_done(1u);
     }
 }

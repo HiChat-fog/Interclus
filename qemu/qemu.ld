@@ -104,6 +104,9 @@ SECTIONS {
   .attacker_ram 0x80208000 (NOLOAD) : {
     attacker.o(.data .data.* .bss .bss.* .sbss .sdata)
   } > RAM
+
+  /* native slot 1 (E22): RAM window 2, exec via the shared PMP pair */
+  .nat2_ram 0x80213000 (NOLOAD) : { KEEP(*(.nat2_ram)) }
 }
 
 _sup_stack_top = 0x8000F000;
