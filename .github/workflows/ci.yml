@@ -49,3 +49,5 @@ jobs:
           grep -q "== HOT PASS ==" hot.log
           python3 tools/chan_qemu.py | tee chan.log
           grep -q "== CHAN PASS ==" chan.log
+          python3 tools/tele_qemu.py | tee tele.log
+          grep -q "RESULT: PASS" tele.log

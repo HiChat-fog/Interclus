@@ -83,6 +83,20 @@ unsigned uart_poll_frame(uint8_t *dst, unsigned cap, uart_frame_rx *st) {
     }
 }
 
+void uart_send_frame(uint8_t type, const uint8_t *payload, unsigned len) {
+    unsigned sum = type + (len & 0xFFu) + (len >> 8);
+    uart_putc((char)0x7E);
+    uart_putc((char)0x7E);
+    uart_putc((char)type);
+    uart_putc((char)(len & 0xFFu));
+    uart_putc((char)(len >> 8));
+    for (unsigned i = 0; i < len; i++) {
+        uart_putc((char)payload[i]);
+        sum += payload[i];
+    }
+    uart_putc((char)((-sum) & 0xFFu));
+}
+
 unsigned uart_recv(uint8_t *dst, unsigned cap) {
     uart_frame_rx st = { 0, 0, 0, 0, 0 };
     uint32_t t0 = TIMER_NOW();

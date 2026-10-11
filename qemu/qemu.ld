@@ -18,6 +18,7 @@ SECTIONS {
     uart.o(.text .text.*)
     frame.o(.text .text.*)
     chan_test.o(.text .text.*)
+    tele_test.o(.text .text.*)
     main_pmp.o(.text .text.*)
     trap_pmp.o(.text .text.*)
     main_qemu.o(.rodata .rodata.*)
@@ -30,6 +31,7 @@ SECTIONS {
     uart.o(.rodata .rodata.*)
     frame.o(.rodata .rodata.*)
     chan_test.o(.rodata .rodata.*)
+    tele_test.o(.rodata .rodata.*)
     main_pmp.o(.rodata .rodata.*)
     trap_pmp.o(.rodata .rodata.*)
     . = ALIGN(4);
@@ -46,6 +48,7 @@ SECTIONS {
     uart.o(.data .data.*)
     frame.o(.data .data.*)
     chan_test.o(.data .data.*)
+    tele_test.o(.data .data.*)
     main_pmp.o(.data .data.*)
     trap_pmp.o(.data .data.*)
     . = ALIGN(4);
@@ -62,6 +65,7 @@ SECTIONS {
     uart.o(.bss .bss.* COMMON)
     frame.o(.bss .bss.* COMMON)
     chan_test.o(.bss .bss.* COMMON)
+    tele_test.o(.bss .bss.* COMMON)
     main_pmp.o(.bss .bss.* COMMON)
     trap_pmp.o(.bss .bss.* COMMON)
     . = ALIGN(4);

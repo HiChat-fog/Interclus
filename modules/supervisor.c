@@ -143,6 +143,7 @@ static void load_program(void) {
                                     reads as chaos in a dump */
     STATUS[S_HREJ] = 0u;
     STATUS[S_ROLL] = 0u;
+    STATUS[S_REARM] = 0u;
     if (area[0] != PROG_MAGIC) return;
     cnt = area[1];
     if (!cnt || cnt > IC_PROG_MAX_INSNS) { STATUS[S_LOAD] = 2u; return; }
@@ -412,6 +413,22 @@ rej:
     PROG_PEND_OK[0] = 0u;
 }
 
+/* E24 telemetry: fault evidence leaves the device as one frame. slot is
+ * the native table entry (0xFF for the eBPF program), the rest is the
+ * forensics chain verbatim. */
+static void tele_fault(uint32_t slot) {
+    uint8_t p[16];
+    uint32_t i = g_ri_index ? g_ri_index - 1u : 0u;
+    p[0] = (uint8_t)i;
+    p[1] = (uint8_t)cur_comp;
+    p[2] = (uint8_t)slot;
+    for (int k = 0; k < 4; k++) p[4 + k] = (uint8_t)(g_ri_cause[i] >> (8 * k));
+    for (int k = 0; k < 4; k++) p[8 + k] = (uint8_t)(g_ri_addr[i] >> (8 * k));
+    p[12] = (uint8_t)g_nat_live;
+    p[13] = (uint8_t)g_nat_retired;
+    uart_send_frame(FRAME_TELE, p, 16u);
+}
+
 /* E21 runtime channel: one console frame per call, non-blocking. The
  * assembler (core/frame.c) owns transport validity — checksum, bounds —
  * so everything here arrived intact; this owns shape and policy:
@@ -454,6 +471,25 @@ int chan_poll(uart_frame_rx *rx) {
         for (unsigned i = 0; i < n; i++)
             ((volatile uint8_t *)MAILBOX)[i] = g_chan_stage[i];
         return 1;
+    }
+    if (rx->type == FRAME_REARM) {
+        /* operator re-arms a slot: the eviction is cleared and the slot
+         * goes live again. A human decision, never automatic (v1.1);
+         * the frame is 4 bytes = slot index. */
+        uint32_t slot;
+        if (n != 4u) return 0;
+        slot = le32(g_chan_stage);
+        if (slot > 1u || !g_nat[slot].valid) {
+            uart_send_frame(FRAME_REARM, g_chan_stage, 4u);
+            return 3;
+        }
+        g_nat[slot].evicted = 0u;
+        g_nat_live = slot;
+        g_nat_retired = 0u;
+        STATUS[S_NSLOT] = slot;
+        STATUS[S_REARM]++;
+        uart_send_frame(FRAME_REARM, g_chan_stage, 4u);
+        return 3;
     }
     if (rx->type == 3u) {
         if (n < 16u || n > 0x200u) return 0;   /* PEND payload window */
@@ -589,6 +625,7 @@ void supervisor_fault(uint32_t yuanyin, uint32_t zhi) {
             uint32_t other = dead ^ 1u;
             g_nat[dead].evicted = 1u;
             STATUS[S_NAT2] = 0u;
+            tele_fault(dead);
             if (g_nat[other].valid && !g_nat[other].evicted) {
                 g_nat_live = other;
                 g_nat_retired = 0u;

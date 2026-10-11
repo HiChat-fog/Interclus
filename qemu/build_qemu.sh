@@ -46,8 +46,11 @@ $LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_urx.elf \
     load_urx.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o compartment.o native_blob.o
 $CC -c ../qemu/hot_test.c -o hot_test.o
 $CC -c ../qemu/chan_test.c -o chan_test.o
+$CC -c ../qemu/tele_test.c -o tele_test.o
 $LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_hot.elf \
     hot_test.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o compartment.o native_blob.o native_variant_qemu_blob.o native_variant_s1_qemu_blob.o
 $LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_chan.elf \
     chan_test.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o compartment.o native_blob.o
-echo "build/fw_qemu.elf build/fw_load.elf build/fw_urx.elf build/fw_hot.elf build/fw_chan.elf"
+$LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_tele.elf \
+    tele_test.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o compartment.o native_blob.o native_variant_qemu_blob.o native_variant_s1_qemu_blob.o
+echo "build/fw_qemu.elf build/fw_load.elf build/fw_urx.elf build/fw_hot.elf build/fw_chan.elf build/fw_tele.elf"

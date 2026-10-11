@@ -128,6 +128,11 @@
 #define S_REMAP   96u   /* native slot remap drill: STK ticks for the
                          PMP-pair rewrite onto a different base */
 #define S_NSLOT   97u   /* native slot table: index wired into comp 2 */
+#define S_REARM   98u   /* operator re-arm commands accepted */
+
+/* channel frame types beyond the loader set (E24) */
+#define FRAME_TELE   0xFu   /* device -> host: fault evidence */
+#define FRAME_REARM  0xEu   /* host -> device: operator re-arms slot k */
 
 /* PMP NAPOT encodings, derived from the map */
 #define NAPOT(base, size) (((base) >> 2) | ((size) >> 3) - 1u)

@@ -43,4 +43,8 @@ unsigned uart_frame_step(uint8_t byte, uint8_t *dst, unsigned cap,
  * at line rate. */
 unsigned uart_poll_frame(uint8_t *dst, unsigned cap, uart_frame_rx *st);
 
+/* One frame out: sync, type, len16, payload, sum8 — the inverse of
+ * uart_frame_step. Blocking TX, payload at most 64 bytes. */
+void uart_send_frame(uint8_t type, const uint8_t *payload, unsigned len);
+
 #endif
