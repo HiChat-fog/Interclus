@@ -11,6 +11,7 @@ $CC -c ../core/trap.S -o trap_pmp.o
 $CC -c ../core/loader.c -o loader.o
 $CC -c ../core/uart.c -o uart.o
 $CC -c ../core/frame.c -o frame.o
+$CC -c ../core/flash.c -o flash.o
 $CC -c ../core/compartment.c -o compartment.o
 $CC -Os -c ../modules/supervisor.c -o main_pmp.o
 $CC -c ../modules/monitor.c -o monitor.o
@@ -31,7 +32,7 @@ riscv64-unknown-elf-objcopy -I binary -O elf32-littleriscv -B riscv \
     --rename-section .data=.native_blob,alloc,load,readonly,contents \
     native_demo.bin native_blob.o
 $LLD -flavor gnu -T ../modules/board.ld -nostdlib -o fw_pmp.elf \
-    startup.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o compartment.o native_blob.o
+    startup.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o compartment.o native_blob.o
 riscv64-unknown-elf-objcopy -O binary --only-section=.text --only-section=.monitor_text --only-section=.attacker_text --only-section=.native_blob fw_pmp.elf fw_pmp.bin
 $CC -c ../modules/pmp_probe.c -o pmp_probe.o
 $LLD -flavor gnu -T ../modules/probe.ld -nostdlib -o pmp_probe.elf pmp_probe.o

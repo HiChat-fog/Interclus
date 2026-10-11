@@ -1,7 +1,7 @@
 OUTPUT_ARCH(riscv)
 ENTRY(_start)
 MEMORY {
-  FLASH (rx)  : ORIGIN = 0x08000000, LENGTH = 480K
+  FLASH (rx)  : ORIGIN = 0x08000000, LENGTH = 252K
   RAM   (rwx) : ORIGIN = 0x20000000, LENGTH = 64K
 }
 SECTIONS {
@@ -57,6 +57,9 @@ SECTIONS {
     KEEP(*(.meas_res))
   }
   ASSERT(SIZEOF(.text) <= 0x2800, "supervisor .text overflows the supervisor window")
+  /* E25: the top two flash pages hold the slot mirror (0x8077000..0x8078000);
+     the firmware image must never grow into them */
+
   ASSERT(SIZEOF(.monitor_text) <= 0x2000, "monitor text overflows its window")
   _stack_top     = 0x20003F00;  
   _sup_stack_top = 0x20003F00;  

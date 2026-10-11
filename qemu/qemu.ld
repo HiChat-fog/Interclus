@@ -19,6 +19,8 @@ SECTIONS {
     frame.o(.text .text.*)
     chan_test.o(.text .text.*)
     tele_test.o(.text .text.*)
+    persist_test.o(.text .text.*)
+    flash.o(.text .text.*)
     main_pmp.o(.text .text.*)
     trap_pmp.o(.text .text.*)
     main_qemu.o(.rodata .rodata.*)
@@ -32,6 +34,8 @@ SECTIONS {
     frame.o(.rodata .rodata.*)
     chan_test.o(.rodata .rodata.*)
     tele_test.o(.rodata .rodata.*)
+    persist_test.o(.rodata .rodata.*)
+    flash.o(.rodata .rodata.*)
     main_pmp.o(.rodata .rodata.*)
     trap_pmp.o(.rodata .rodata.*)
     . = ALIGN(4);
@@ -49,6 +53,8 @@ SECTIONS {
     frame.o(.data .data.*)
     chan_test.o(.data .data.*)
     tele_test.o(.data .data.*)
+    persist_test.o(.data .data.*)
+    flash.o(.data .data.*)
     main_pmp.o(.data .data.*)
     trap_pmp.o(.data .data.*)
     . = ALIGN(4);
@@ -66,6 +72,8 @@ SECTIONS {
     frame.o(.bss .bss.* COMMON)
     chan_test.o(.bss .bss.* COMMON)
     tele_test.o(.bss .bss.* COMMON)
+    persist_test.o(.bss .bss.* COMMON)
+    flash.o(.bss .bss.* COMMON)
     main_pmp.o(.bss .bss.* COMMON)
     trap_pmp.o(.bss .bss.* COMMON)
     . = ALIGN(4);
@@ -111,6 +119,9 @@ SECTIONS {
 
   /* native slot 1 (E22): RAM window 2, exec via the shared PMP pair */
   .nat2_ram 0x80213000 (NOLOAD) : { KEEP(*(.nat2_ram)) }
+
+  /* E25: RAM-backed flash mirror for the QEMU target */
+  .mir_ram 0x80214000 (NOLOAD) : { KEEP(*(.mir_ram)) }
 }
 
 _sup_stack_top = 0x8000F000;

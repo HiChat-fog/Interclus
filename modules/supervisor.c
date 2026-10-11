@@ -7,6 +7,10 @@
 #include "../descriptions/demo.h"
 #include "policies/mavlink.h"
 #include "policies/screening.h"
+extern int flash_mirror_write(uint32_t slot, const uint8_t *code,
+                              uint32_t len, uint32_t entry);
+extern uint32_t flash_mirror_read(uint32_t slot, uint8_t *out,
+                                  uint32_t cap, uint32_t *entry);
 #include "../core/platform.h"
 
 #define MO_SHU  0x5741524Du
@@ -248,6 +252,34 @@ void boot_main(void) {
         g_nat[1].valid = 0u; g_nat[1].evicted = 0u;
         g_nat_live = 0u;
         g_nat_retired = 0u;
+        /* E25 restore: a mirrored slot comes back as the live module.
+         * The bytes are untrusted flash contents, so the descriptor gate
+         * runs before the table accepts them; a blank page keeps the
+         * built-in demo. */
+        for (uint32_t k = 0; k < 2u; k++) {
+            uint32_t len = flash_mirror_read(k, (uint8_t *)(k ? NAT2_TEXT
+                                                              : NAT_TEXT),
+                                             0x1F0u, &g_nat[k].entry);
+            if (!len) continue;
+            {
+                ic_compartment_spec sp;
+                ic_module_desc d;
+                nat_spec(k, &sp);
+                d.magic = IC_MODULE_MAGIC; d.contract_ver = IC_CONTRACT_VERSION;
+                d.kind = IC_MODULE_NATIVE; d.text_base = sp.text_base;
+                d.text_size = 0x1000u; d.sram_base = sp.sram_base;
+                d.sram_size = 0x1000u; d.entry_offset = g_nat[k].entry;
+                d.reserved = 0u;
+                if (ic_module_check(&d) != IC_OK) {
+                    *(volatile uint32_t *)(k ? NAT2_SRAM : NAT_SRAM) = 0u;
+                    continue;
+                }
+            }
+            g_nat[k].len = len;
+            g_nat[k].valid = 1u;
+            g_nat[k].evicted = 0u;
+            g_nat_live = k;
+        }
     }
 
     csr_write(0x305, (uint32_t)trap_entry);
@@ -369,6 +401,8 @@ void hot_swap(void) {
         if (ic_module_check(&d) != IC_OK) goto rej;
         memcpy((void *)s.text_base,
                (const void *)(PROG_PEND_ADDR + 16u), w0);  /* staged -> slot */
+        STATUS[S_FPROG] = (uint32_t)flash_mirror_write(
+            slot, (const uint8_t *)(PROG_PEND_ADDR + 16u), w0, entry);
         g_nat[slot].len = w0;
         g_nat[slot].entry = entry;
         g_nat[slot].valid = 1u;

@@ -51,3 +51,5 @@ jobs:
           grep -q "== CHAN PASS ==" chan.log
           python3 tools/tele_qemu.py | tee tele.log
           grep -q "RESULT: PASS" tele.log
+          timeout 30 qemu-system-riscv32 -M virt -bios none -kernel build/fw_persist.elf -display none -serial stdio -monitor none < /dev/null | tee persist.log
+          grep -q "== PERSIST PASS ==" persist.log

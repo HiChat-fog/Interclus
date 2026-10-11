@@ -16,6 +16,7 @@
 #define MON_STACK  0x80201F00u
 #define ATK_STACK  0x80209F00u
 #define PROG_AREA  0x80020000u   /* boot-time program image, untrusted */
+#define FLASH_TOP  0x8078000u    /* QEMU: RAM-backed mirror */
 #define STATUS      ((volatile uint32_t *)0x80010000u)
 #define STATUS_NAME ((volatile char *)0x80010110u)
 #define MAILBOX    ((volatile uint32_t *)0x80011000u)
@@ -38,6 +39,7 @@
 #define MON_STACK  0x20005F00u
 #define ATK_STACK  0x20009F00u
 #define PROG_AREA  0x20003000u   /* boot-time program image, untrusted */
+#define FLASH_TOP  0x8040000u    /* 256K real; mirror at the top 4K */
 #define STATUS      ((volatile uint32_t *)0x20000100u)
 #define STATUS_NAME ((volatile char *)0x20000110u)
 #define MAILBOX    ((volatile uint32_t *)0x20002000u)
@@ -129,6 +131,7 @@
                          PMP-pair rewrite onto a different base */
 #define S_NSLOT   97u   /* native slot table: index wired into comp 2 */
 #define S_REARM   98u   /* operator re-arm commands accepted */
+#define S_FPROG   99u   /* last flash mirror write: 0 ok */
 
 /* channel frame types beyond the loader set (E24) */
 #define FRAME_TELE   0xFu   /* device -> host: fault evidence */
