@@ -57,6 +57,16 @@ def main():
     trap_s0 = _bin("native_trap_qemu.bin")
     imgs.append(("native_trap (qemu, slot0)", pend_image(
         2, len(trap_s0), 0, 0, trap_s0)))
+    for name, fname, slot in (
+            ("native_variant_s1 (board, slot1)", "native_variant_s1.bin", 1),
+            ("native_variant (board, slot0)", "native_variant.bin", 0),
+            ("native_trap_s1 (board, slot1)", "native_trap_s1.bin", 1),
+            ("native_trap (board, slot0)", "native_trap.bin", 0)):
+        try:
+            code = _bin(fname)
+        except FileNotFoundError:
+            continue              # board build not present this run
+        imgs.append((name, pend_image(2, len(code), 0, slot, code)))
     def enc(op, d, s, o, i):
         return ((op & 0xFF) | (((d & 0xF) | ((s & 0xF) << 4)) << 8)
                 | ((o & 0xFFFF) << 16) | ((i & 0xFFFFFFFF) << 32))

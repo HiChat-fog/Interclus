@@ -28,19 +28,24 @@
 #define FMC_CTLR    (*(volatile uint32_t *)0x40022010u)
 #define FMC_ADDR    (*(volatile uint32_t *)0x40022014u)
 #define FMC_STATR   (*(volatile uint32_t *)0x4002200Cu)
-/* Board finding (CH32V307VCT6, ChipID 30700568): M-mode self-
- * programming of the main array is unreliable in the running-firmware
- * context — the same store sequence lands from a standalone cold-boot
- * probe (modules/ftest.c, page reads back the written pattern) but
- * silently does nothing from the service loop, and the capability
- * degrades with repeated FMC use until a power cycle. Erased flash
- * reads 0xE339E339 (word) per the reference manual; the debugger path
- * shows that fill while some CPU-side reads return fixed junk, so all
- * verification happens through the boot-time restore gate, which reads
- * the mirror fresh after reset and rejects anything malformed. The
- * mechanism stays: a mirror that survives a power cycle when the
- * silicon cooperates, and a gate that makes wrong contents harmless
- * when it does not. */
+/* Board findings (CH32V307VCT6, ChipID 30700568):
+ * 1. Erased flash reads 0xE339E339 per word (reference manual); the
+ *    debugger shows that fill while the CPU's own FMC-window reads
+ *    return fixed junk — verification never happens in-flight, only
+ *    through the boot-time restore gate, which reads the page fresh
+ *    after reset and rejects anything malformed (proven on hardware:
+ *    a debugger-written mirror page survives reset and is restored
+ *    into the schedule).
+ * 2. M-mode self-programming of the main array silently fails on this
+ *    unit after repeated FMC use: erase lands (page reads as the
+ *    0xE339 fill), program stores don't — while the debugger path
+ *    writes the same page fine, so the array is healthy and only the
+ *    CPU program path is affected. The standalone probe
+ *    (modules/ftest.c) programmed successfully once from a cold chip
+ *    before the degradation set in.
+ * The mechanism stays: write the mirror however the platform allows
+ * (self-programming when the silicon cooperates, flashing tool when it
+ * doesn't), and a restore gate that makes wrong contents harmless. */
 #define FMC_STD_PG  (1u << 0)
 #define FMC_STD_PER (1u << 1)
 #define FMC_CTLR_START (1u << 6)
@@ -64,7 +69,10 @@ static void fmc_wait_wrbsy(void) {
  * (the debugger sees true bits) — an RMW like 'CTLR |= bit' therefore
  * writes junk|bit back and wedges the controller. Absolute stores
  * only; SCKMOD (bit25, HCLK/2 access) is the one config bit we keep. */
-#define FMC_CTLR_CLEAN ((1u << 25) | (1u << 8))   /* SCKMOD | PRFTBE */
+/* PRFTBE only: bit25 (SCKMOD) written alongside PG/PER made the
+ * controller ignore the program stores; the reset default already
+ * runs half-clock. Absolute stores, no reads. */
+#define FMC_CTLR_CLEAN (1u << 8)
 static void unlock(void) {
     /* the key sequence must come FIRST: CTLR writes are ignored while
      * LOCK is set (the reset default), so cleaning bits before the keys
