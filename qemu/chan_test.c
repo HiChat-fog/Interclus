@@ -18,6 +18,7 @@
 #include "../core/platform.h"
 #include "../core/uart.h"
 #include "../modules/examples/pass_all.c"
+#include "trust_stub.h"
 
 void uart_puts(const char *s);
 int report(void);
@@ -37,7 +38,10 @@ static volatile unsigned state;
 
 static uart_frame_rx rx;
 
-/* pull frames until `want` channel events happened; returns how many */
+/* pull frames until `want` channel events happened. During rounds
+ * 1..4 nothing else consumes the console (the service loop starts at
+ * native_done, after this drill), so this direct drain is the only
+ * reader — no double-consumer. */
 static int drain(int want) {
     int got = 0;
     uint32_t t0 = TIMER_NOW();
@@ -103,7 +107,17 @@ void sweep_next(void) {
         qemu_exit(ok ? 0 : 1);
     }
     if (!ok) {
-        uart_puts("\n== CHAN FAIL ==\n");
+        uart_puts("\n== CHAN FAIL ==\n[load=");
+        uart_putdec(STATUS[S_LOAD]);
+        uart_puts(" hload=");
+        uart_putdec(STATUS[S_HLOAD]);
+        uart_puts(" hrej=");
+        uart_putdec(STATUS[S_HREJ]);
+        uart_puts(" n=");
+        uart_putdec(STATUS[S_CHONGTU_N]);
+        uart_puts(" src=");
+        uart_putdec(STATUS[S_LAIYUAN]);
+        uart_puts("]\n");
         qemu_exit(1);
     }
     hot_round();

@@ -10,11 +10,11 @@ static const ic_module_desc ic_module_monitor __attribute__((unused)) = { IC_MOD
 static const ic_module_desc ic_module_attacker __attribute__((unused)) = { IC_MODULE_MAGIC, 1u, IC_MODULE_NATIVE, 0x80102000u, 0x2000u, 0x80208000u, 0x2000u, 0x0u, 0u };
 static const ic_module_desc ic_module_nativedemo __attribute__((unused)) = { IC_MODULE_MAGIC, 1u, IC_MODULE_NATIVE, 0x80210000u, 0x1000u, 0x80211000u, 0x1000u, 0x0u, 0u };
 #else
-static const ic_compartment_spec ic_comp_monitor __attribute__((unused)) = { 0x8003000u, 0x2000u, 0x20004000u, 0x2000u };
+static const ic_compartment_spec ic_comp_monitor __attribute__((unused)) = { 0x8004000u, 0x2000u, 0x20004000u, 0x2000u };
 static const ic_compartment_spec ic_comp_attacker __attribute__((unused)) = { 0x8006000u, 0x2000u, 0x20008000u, 0x2000u };
 static const ic_compartment_spec ic_comp_native __attribute__((unused)) = { 0x2000A000u, 0x1000u, 0x2000B000u, 0x1000u };
 
-static const ic_module_desc ic_module_monitor __attribute__((unused)) = { IC_MODULE_MAGIC, 1u, IC_MODULE_EBPF, 0x8003000u, 0x2000u, 0x20004000u, 0x2000u, 0x0u, 0u };
+static const ic_module_desc ic_module_monitor __attribute__((unused)) = { IC_MODULE_MAGIC, 1u, IC_MODULE_EBPF, 0x8004000u, 0x2000u, 0x20004000u, 0x2000u, 0x0u, 0u };
 static const ic_module_desc ic_module_attacker __attribute__((unused)) = { IC_MODULE_MAGIC, 1u, IC_MODULE_NATIVE, 0x8006000u, 0x2000u, 0x20008000u, 0x2000u, 0x0u, 0u };
 static const ic_module_desc ic_module_nativedemo __attribute__((unused)) = { IC_MODULE_MAGIC, 1u, IC_MODULE_NATIVE, 0x2000A000u, 0x1000u, 0x2000B000u, 0x1000u, 0x0u, 0u };
 #endif

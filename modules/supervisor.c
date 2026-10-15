@@ -11,6 +11,7 @@ extern int flash_mirror_write(uint32_t slot, const uint8_t *code,
                               uint32_t len, uint32_t entry);
 extern uint32_t flash_mirror_read(uint32_t slot, uint8_t *out,
                                   uint32_t cap, uint32_t *entry);
+void sha256(const uint8_t *data, uint32_t len, uint8_t out[32]);
 #include "../core/platform.h"
 
 #define MO_SHU  0x5741524Du
@@ -379,12 +380,76 @@ void supervisor_reset(void) {
  * slot), a native module swaps into NAT_TEXT (shadowed at PROG_NSH). A
  * rejected image is consumed and recorded — the schedule is never
  * touched. */
+/* the trust root: digests of the modules this build accepts, computed
+ * by tools/sign_module.py over the exact staged bytes. A digest not on
+ * this list is a module this firmware has never seen — rejected. */
+static const uint8_t g_trusted[][32] = {
+    /* pass_all (tools/sign_module.py --emit-header, over the exact
+     * staged bytes; regenerate after changing any module or build) */
+    { 0x7Eu, 0xB4u, 0x9Du, 0x31u, 0xC8u, 0x28u, 0x28u, 0x2Cu,
+      0x9Bu, 0x65u, 0x3Fu, 0x18u, 0xFFu, 0xD2u, 0x89u, 0x85u,
+      0xFAu, 0x00u, 0xC7u, 0x9Eu, 0x41u, 0xAEu, 0xF9u, 0x79u,
+      0x87u, 0x68u, 0x0Au, 0x0Fu, 0x25u, 0x2Fu, 0x63u, 0x45u },
+    /* native_variant_s1 (qemu, slot1) */
+    { 0x77u, 0x93u, 0xFFu, 0x1Fu, 0x0Eu, 0xA7u, 0x06u, 0x9Cu,
+      0xB2u, 0xE9u, 0x4Cu, 0x83u, 0x6Au, 0x12u, 0x03u, 0x95u,
+      0x30u, 0x39u, 0xE4u, 0x7Cu, 0xE1u, 0x8Du, 0xDAu, 0x54u,
+      0xC6u, 0x7Eu, 0x15u, 0x09u, 0xE7u, 0x49u, 0x41u, 0x54u },
+    /* native_variant (qemu, slot0) */
+    { 0x80u, 0xC6u, 0xF8u, 0xC5u, 0x75u, 0xF1u, 0xFBu, 0x6Bu,
+      0x49u, 0x83u, 0xD2u, 0xE2u, 0xB1u, 0xBAu, 0x36u, 0xD5u,
+      0xA0u, 0x61u, 0xA5u, 0xADu, 0x2Fu, 0x2Du, 0xF0u, 0xC9u,
+      0xF1u, 0x57u, 0x16u, 0x8Au, 0x80u, 0x6Fu, 0x10u, 0x5Du },
+    /* native_trap_s1 (qemu, slot1): signed, fetch-faults at run */
+    { 0x53u, 0x85u, 0x49u, 0xCEu, 0x4Au, 0x50u, 0x7Du, 0x83u,
+      0x90u, 0x9Bu, 0x02u, 0x75u, 0xFAu, 0x9Eu, 0x0Au, 0x1Eu,
+      0x4Au, 0xC9u, 0x40u, 0x30u, 0x80u, 0xA7u, 0xF5u, 0x4Eu,
+      0xBEu, 0xA2u, 0x8Au, 0x60u, 0xFFu, 0xFDu, 0x3Du, 0x02u },
+    /* native_trap (qemu, slot0): signed, fetch-faults at run */
+    { 0xC4u, 0xF7u, 0xF1u, 0x6Au, 0x3Fu, 0x2Bu, 0x81u, 0x0Eu,
+      0x04u, 0x8Du, 0xA4u, 0x55u, 0xFEu, 0xBFu, 0xF2u, 0xCFu,
+      0xEFu, 0x2Bu, 0xCFu, 0x86u, 0xCAu, 0x84u, 0xE8u, 0xEEu,
+      0x3Fu, 0x93u, 0xF8u, 0xFDu, 0x28u, 0xEBu, 0xC3u, 0x24u },
+    /* badrun (legal, runtime-FP fault for the rollback drill) */
+    { 0x35u, 0x94u, 0x5Bu, 0x44u, 0x09u, 0x52u, 0x5Cu, 0x2Eu,
+      0x23u, 0xDEu, 0xE3u, 0x90u, 0x11u, 0x64u, 0x12u, 0xE7u,
+      0x5Eu, 0x8Du, 0xACu, 0x82u, 0xF9u, 0xA5u, 0x63u, 0xCEu,
+      0x99u, 0xBBu, 0xCBu, 0x16u, 0xC5u, 0x8Fu, 0x27u, 0xD7u },
+};
+#define TRUSTED_N (sizeof(g_trusted) / sizeof(g_trusted[0]))
+
+/* E26 gate: the staged image is [header..payload][32-byte digest].
+ * Recompute over everything before the digest; mismatch = tampered in
+ * transit. Digest not pinned = unknown module. Both reject. */
+static int trust_check(const uint8_t *img, uint32_t body,
+                       const uint8_t *digest) {
+    uint8_t calc[32];
+    sha256(img, body, calc);
+    for (uint32_t k = 0; k < 32u; k++)
+        if (calc[k] != digest[k]) return 0;
+    for (uint32_t t = 0; t < TRUSTED_N; t++) {
+        uint32_t ok = 1u;
+        for (uint32_t k = 0; k < 32u; k++)
+            if (g_trusted[t][k] != digest[k]) { ok = 0u; break; }
+        if (ok) return 1;
+    }
+    return 0;
+}
+
 void hot_swap(void) {
     volatile uint32_t *pend = (volatile uint32_t *)PROG_PEND_ADDR;
     uint32_t w0, kind, i;
     if (PROG_PEND_OK[0] != PROG_PEND_MAGIC) return;   /* magic lands last */
     w0 = pend[0];
     kind = pend[1];
+    {
+        /* the trailer digest rides after the payload; recompute over
+         * everything before it, then require it pinned */
+        const uint8_t *img = (const uint8_t *)PROG_PEND_ADDR;
+        uint32_t body = (kind == PEND_NATIVE) ? 16u + w0 : 8u + w0 * 8u;
+        if (body > 0x200u - SHA256_LEN || body < 16u) goto rej;
+        if (!trust_check(img, body, img + body)) goto rej;
+    }
     if (kind == PEND_NATIVE) {
         uint32_t entry = pend[2];
         uint32_t slot = pend[3];
@@ -486,14 +551,20 @@ int chan_poll(uart_frame_rx *rx) {
     unsigned n = uart_poll_frame(g_chan_stage, sizeof g_chan_stage, rx);
     if (!n) return 0;
     if (rx->type == 1u) {
-        if (n < 8u || le32(g_chan_stage) != PROG_MAGIC) return 0;
+        /* the payload is [PROG header][insns][32-byte digest]; the
+         * digest stays in the frame — the gate recomputes over the
+         * staged body after the image lands in PEND */
+        if (n < 8u + SHA256_LEN || le32(g_chan_stage) != PROG_MAGIC)
+            return 0;
         uint32_t cnt = le32(g_chan_stage + 4u);
-        if (!cnt || cnt > IC_PROG_MAX_INSNS || n != 8u + cnt * 8u) return 0;
+        if (!cnt || cnt > IC_PROG_MAX_INSNS ||
+            n != 8u + cnt * 8u + SHA256_LEN) return 0;
         volatile uint32_t *pend = (volatile uint32_t *)PROG_PEND_ADDR;
         volatile uint8_t *dst = (volatile uint8_t *)(PROG_PEND_ADDR + 8u);
         pend[0] = cnt;
         pend[1] = PEND_EBPF;
-        for (unsigned i = 0; i < n - 8u; i++) dst[i] = g_chan_stage[8u + i];
+        for (unsigned i = 0; i < n - 8u; i++)
+            dst[i] = g_chan_stage[8u + i];   /* body + trailing digest */
         PROG_PEND_OK[0] = PROG_PEND_MAGIC;               /* lands last */
         return 2;
     }

@@ -26,6 +26,7 @@
 #include <stdint.h>
 #include "../core/platform.h"
 #include "../modules/examples/pass_all.c"
+#include "trust_stub.h"
 
 void uart_puts(const char *s);
 void uart_puthex(uint32_t v);
@@ -65,6 +66,7 @@ static void stage_pend(uint32_t addr, const uint64_t *ins, uint32_t cnt) {
     a[0] = cnt;
     a[1] = PEND_EBPF;
     for (uint32_t i = 0; i < cnt; i++) p[i] = ins[i];
+    trust_stamp((volatile uint8_t *)addr, 8u + cnt * 8u);
     a[0x208u / 4u] = PROG_PEND_MAGIC;                 /* lands last */
 }
 
@@ -72,6 +74,10 @@ extern const uint8_t _binary_native_variant_qemu_bin_start[];
 extern const uint8_t _binary_native_variant_qemu_bin_end[];
 extern const uint8_t _binary_native_variant_s1_qemu_bin_start[];
 extern const uint8_t _binary_native_variant_s1_qemu_bin_end[];
+extern const uint8_t _binary_native_trap_s1_qemu_bin_start[];
+extern const uint8_t _binary_native_trap_s1_qemu_bin_end[];
+extern const uint8_t _binary_native_trap_qemu_bin_start[];
+extern const uint8_t _binary_native_trap_qemu_bin_end[];
 
 /* native PEND image: [0]=len, [1]=kind, [2]=entry, [3]=slot, code at +16 */
 static void stage_native(uint32_t addr, const uint8_t *code, uint32_t len,
@@ -83,17 +89,15 @@ static void stage_native(uint32_t addr, const uint8_t *code, uint32_t len,
     a[2] = entry;
     a[3] = slot;
     for (uint32_t i = 0; i < len; i++) p[i] = code[i];
+    trust_stamp((volatile uint8_t *)addr, 16u + len);
     a[0x208u / 4u] = PROG_PEND_MAGIC;
 }
 
-/* the fetch-fault twist: auipc t0,0; jalr x0,0x1000(t0) — lands in the
- * SRAM window where X is denied; target-independent */
+/* the hostile payload is now a signed module (native_trap): it fetches
+ * +0x1000 into the SRAM window where X is denied — identity proven by
+ * the trust gate, safety still the PMP's job */
 static uint32_t badnat(const uint8_t *src, uint32_t len, uint32_t slot) {
-    static uint8_t img[0x1F0u];
-    for (uint32_t i = 0; i < len; i++) img[i] = src[i];
-    img[0] = 0x97; img[1] = 0x02; img[2] = 0x00; img[3] = 0x00;
-    img[4] = 0x67; img[5] = 0x80; img[6] = 0x02; img[7] = 0x10;
-    stage_native(PROG_PEND_ADDR, img, len, 0u, slot);
+    stage_native(PROG_PEND_ADDR, src, len, 0u, slot);
     return len;
 }
 
@@ -141,9 +145,9 @@ void sweep_next(void) {
         ok = STATUS[S_NAT2] == 0xC0DE0003u && STATUS[S_NSLOT] == 0u;
         /* the fetch-fault variant into slot 1: slot 0 keeps the good
          * image as last-known-good */
-        badnat(_binary_native_variant_s1_qemu_bin_start,
-               (uint32_t)(_binary_native_variant_s1_qemu_bin_end
-                          - _binary_native_variant_s1_qemu_bin_start), 1u);
+        badnat(_binary_native_trap_s1_qemu_bin_start,
+               (uint32_t)(_binary_native_trap_s1_qemu_bin_end
+                          - _binary_native_trap_s1_qemu_bin_start), 1u);
         hot_swap();
         if (STATUS[S_HLOAD] != 3u || STATUS[S_NSLOT] != 1u) ok = 0;
     } else if (state == 4) {
@@ -169,9 +173,9 @@ void sweep_next(void) {
         /* slot 1 ran its own image: proof from NAT2_SRAM */
         ok = STATUS[S_NAT2] == 0xC0DE0003u && verdicts_ok();
         /* now poison slot 0: install clears its eviction and goes live */
-        badnat(_binary_native_variant_qemu_bin_start,
-               (uint32_t)(_binary_native_variant_qemu_bin_end
-                          - _binary_native_variant_qemu_bin_start), 0u);
+        badnat(_binary_native_trap_qemu_bin_start,
+               (uint32_t)(_binary_native_trap_qemu_bin_end
+                          - _binary_native_trap_qemu_bin_start), 0u);
         hot_swap();
         if (STATUS[S_HLOAD] != 5u || STATUS[S_NSLOT] != 0u) ok = 0;
     } else if (state == 7) {

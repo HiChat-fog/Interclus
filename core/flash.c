@@ -105,6 +105,11 @@ static void program_page(uint32_t addr, const uint32_t *words,
         fmc_wait_wrbsy();
     }
 }
+#endif /* QEMU_TARGET: FMC registers exist on the board only */
+
+#ifdef QEMU_TARGET
+/* RAM-backed stand-in for the two mirror pages; tests poke it directly */
+uint32_t mir_ram[0x800u / 4u] __attribute__((section(".mir_ram")));
 #endif /* QEMU_TARGET */
 
 int flash_mirror_write(uint32_t slot, const uint8_t *code, uint32_t len,

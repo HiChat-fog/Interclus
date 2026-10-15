@@ -11,7 +11,7 @@ SECTIONS {
     *(EXCLUDE_FILE(monitor.o attacker.o) .rodata .rodata.*)
     . = ALIGN(4);
   } > FLASH
-  .monitor_text 0x08003000 : {
+  .monitor_text 0x08004000 : {
     KEEP(monitor.o(.text .text.* .monitor.text))
     KEEP(monitor.o(.rodata .rodata.*))
     . = ALIGN(4);
@@ -56,7 +56,7 @@ SECTIONS {
   .meas_res 0x20001900 (NOLOAD) : {
     KEEP(*(.meas_res))
   }
-  ASSERT(SIZEOF(.text) <= 0x2800, "supervisor .text overflows the supervisor window")
+  ASSERT(SIZEOF(.text) <= 0x3800, "supervisor .text overflows the supervisor window")
   /* E25: the top two flash pages hold the slot mirror (0x8077000..0x8078000);
      the firmware image must never grow into them */
 

@@ -13,6 +13,7 @@
 #include "../core/platform.h"
 #include "../core/uart.h"
 #include "../modules/examples/pass_all.c"
+#include "trust_stub.h"
 
 void uart_puts(const char *s);
 void uart_puthex(uint32_t v);
@@ -25,8 +26,10 @@ void hot_round(void);
 int chan_poll(uart_frame_rx *rx);
 void qemu_exit(int code);
 
-extern const uint8_t _binary_native_variant_s1_qemu_bin_start[];
-extern const uint8_t _binary_native_variant_s1_qemu_bin_end[];
+extern const uint8_t _binary_native_trap_s1_qemu_bin_start[];
+extern const uint8_t _binary_native_trap_s1_qemu_bin_end[];
+extern const uint8_t _binary_native_trap_qemu_bin_start[];
+extern const uint8_t _binary_native_trap_qemu_bin_end[];
 
 static volatile unsigned state;
 static uart_frame_rx rx;
@@ -40,17 +43,20 @@ static void stage_native(uint32_t addr, const uint8_t *code, uint32_t len,
     a[2] = entry;
     a[3] = slot;
     for (uint32_t i = 0; i < len; i++) p[i] = code[i];
+    trust_stamp((volatile uint8_t *)addr,
+                (a[1] == PEND_NATIVE) ? 16u + a[0]
+                                      : 8u + a[0] * 8u);
     a[0x208u / 4u] = PROG_PEND_MAGIC;
 }
 
 static void badnat(uint32_t slot) {
-    static uint8_t img[0x1F0u];
-    uint32_t len = (uint32_t)(_binary_native_variant_s1_qemu_bin_end
-                              - _binary_native_variant_s1_qemu_bin_start);
-    for (uint32_t i = 0; i < len; i++) img[i] = _binary_native_variant_s1_qemu_bin_start[i];
-    img[0] = 0x97; img[1] = 0x02; img[2] = 0x00; img[3] = 0x00;
-    img[4] = 0x67; img[5] = 0x80; img[6] = 0x02; img[7] = 0x10;
-    stage_native(PROG_PEND_ADDR, img, len, 0u, slot);
+    /* slot0 install carries the slot0-pinned digest; the digest covers
+     * the header including the slot word, so image and slot must match */
+    stage_native(PROG_PEND_ADDR,
+                 _binary_native_trap_qemu_bin_start,
+                 (uint32_t)(_binary_native_trap_qemu_bin_end
+                            - _binary_native_trap_qemu_bin_start),
+                 0u, slot);
 }
 
 #define DRAIN_TICKS 3000000u
@@ -86,14 +92,16 @@ void sweep_next(void) {
          * first, the re-arm makes it live — the poisoned image stays
          * dead in the table until overwritten */
         {
+            /* the revive installs a GOOD module: native_variant, whose
+             * digest is pinned (the trap image stays dead in the table
+             * until overwritten) */
             extern const uint8_t _binary_native_variant_qemu_bin_start[];
             extern const uint8_t _binary_native_variant_qemu_bin_end[];
-            static uint8_t img[0x1F0u];
-            uint32_t len = (uint32_t)(_binary_native_variant_qemu_bin_end
-                                      - _binary_native_variant_qemu_bin_start);
-            for (uint32_t i = 0; i < len; i++)
-                img[i] = _binary_native_variant_qemu_bin_start[i];
-            stage_native(PROG_PEND_ADDR, img, len, 0u, 0u);
+            stage_native(PROG_PEND_ADDR,
+                         _binary_native_variant_qemu_bin_start,
+                         (uint32_t)(_binary_native_variant_qemu_bin_end
+                                    - _binary_native_variant_qemu_bin_start),
+                         0u, 0u);
             hot_swap();
         }
     } else {

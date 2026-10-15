@@ -14,6 +14,7 @@
 #include "../core/platform.h"
 #include "../core/uart.h"
 #include "../modules/examples/pass_all.c"
+#include "trust_stub.h"
 
 void uart_puts(const char *s);
 void uart_puthex(uint32_t v);
@@ -25,6 +26,8 @@ void hot_swap(void);
 void hot_round(void);
 void qemu_exit(int code);
 
+extern const uint8_t _binary_native_trap_s1_qemu_bin_start[];
+extern const uint8_t _binary_native_trap_s1_qemu_bin_end[];
 extern const uint8_t _binary_native_variant_s1_qemu_bin_start[];
 extern const uint8_t _binary_native_variant_s1_qemu_bin_end[];
 
@@ -39,6 +42,9 @@ static void stage_native(uint32_t addr, const uint8_t *code, uint32_t len,
     a[2] = entry;
     a[3] = slot;
     for (uint32_t i = 0; i < len; i++) p[i] = code[i];
+    trust_stamp((volatile uint8_t *)addr,
+                (a[1] == PEND_NATIVE) ? 16u + a[0]
+                                      : 8u + a[0] * 8u);
     a[0x208u / 4u] = PROG_PEND_MAGIC;
 }
 

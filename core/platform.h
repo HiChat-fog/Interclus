@@ -27,7 +27,7 @@
 
 #else
 
-#define MON_TEXT   0x08003000u
+#define MON_TEXT   0x08004000u
 #define NAT_TEXT   0x2000A000u   /* native compartment slot 0 (RAM, exec) */
 #define NAT_SRAM   0x2000B000u
 #define NAT2_TEXT  0x2000C000u   /* native compartment slot 1 */
@@ -95,6 +95,14 @@
 #define PROG_PEND_OK    ((volatile uint32_t *)(PROG_PEND_ADDR + 0x208u))
 #define PEND_EBPF       1u
 #define PEND_NATIVE     2u
+
+/* E26 trust: every PEND image trails a 32-byte SHA-256 digest of the
+ * bytes that precede it (header + payload). The gate recomputes the
+ * digest over the staged bytes and rejects on mismatch, so a flipped
+ * bit anywhere in transit never reaches the schedule. The key idea
+ * lives in the trust_notes: the digest is an integrity check; identity
+ * comes from pinning the allowed digests at build time. */
+#define SHA256_LEN      32u
 
 /* attacker-box slots */
 #define ATK_OWN      ((volatile uint32_t *)(ATK_BOX + 0x0u))

@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""Sign a module image for the E26 trust gate: computes the SHA-256
+digest of the exact staged bytes ([header..payload]) and either prints
+the C array fragment (to paste into g_trusted in supervisor.c) or
+emits the digest in hex.
+
+  python3 tools/sign_module.py --pass-all        # digest of the default
+  python3 tools/sign_module.py --emit-header     # C fragment for all
+"""
+import hashlib, struct, sys
+
+def enc(op, d, s, o, i):
+    return ((op & 0xFF) | (((d & 0xF) | ((s & 0xF) << 4)) << 8)
+            | ((o & 0xFFFF) << 16) | ((i & 0xFFFFFFFF) << 32))
+
+PASS_ALL = [
+    enc(0x71, 0, 1, 0, 0),
+    enc(0xB7, 1, 0, 0, 0xFD),
+    enc(0x1D, 0, 1, 2, 0),
+    enc(0xB7, 0, 0, 0, 0),
+    enc(0x95, 0, 0, 0, 0),
+    enc(0xB7, 0, 0, 0, 1),
+    enc(0x95, 0, 0, 0, 0),
+]
+
+def pend_image(kind, w0, entry, slot, payload):
+    if kind == 1:
+        return struct.pack("<II", w0, kind) + payload
+    return struct.pack("<IIII", w0, kind, entry, slot) + payload
+
+def digest(img):
+    return hashlib.sha256(img).digest()
+
+def natvar_s1():
+    return open('build/native_variant_s1_qemu.bin', 'rb').read()
+
+def natvar():
+    return open('build/native_variant_qemu.bin', 'rb').read()
+
+def main():
+    imgs = []
+    imgs.append(("pass_all", pend_image(1, len(PASS_ALL), 0, 0,
+                 b"".join(struct.pack("<Q", e) for e in PASS_ALL))))
+    imgs.append(("native_variant_s1 (qemu, slot1)", pend_image(
+        2, len(natvar_s1()), 0, 1, natvar_s1())))
+    imgs.append(("native_variant (qemu, slot0)", pend_image(
+        2, len(natvar()), 0, 0, natvar())))
+    trap_s1 = open('build/native_trap_s1_qemu.bin', 'rb').read()
+    imgs.append(("native_trap_s1 (qemu, slot1)", pend_image(
+        2, len(trap_s1), 0, 1, trap_s1)))
+    trap_s0 = open('build/native_trap_qemu.bin', 'rb').read()
+    imgs.append(("native_trap (qemu, slot0)", pend_image(
+        2, len(trap_s0), 0, 0, trap_s0)))
+    def enc(op, d, s, o, i):
+        return ((op & 0xFF) | (((d & 0xF) | ((s & 0xF) << 4)) << 8)
+                | ((o & 0xFFFF) << 16) | ((i & 0xFFFFFFFF) << 32))
+    badrun = [enc(0xb7, 10, 0, 0, 1), enc(0xb7, 0, 0, 0, 1),
+              enc(0x95, 0, 0, 0, 0)]
+    imgs.append(("badrun (legal, runtime-FP)", pend_image(
+        1, len(badrun), 0, 0,
+        b"".join(struct.pack("<Q", e) for e in badrun))))
+    if "--pass-all" in sys.argv:
+        d = digest(imgs[0][1])
+        print(d.hex())
+        return 0
+    if "--emit-header" in sys.argv:
+        print("static const uint8_t g_trusted[][32] = {")
+        for name, img in imgs:
+            d = digest(img)
+            rows = ", ".join(f"0x{b:02X}u" for b in d)
+            print(f"    /* {name} */ {{ {rows} }},")
+        print("};")
+        return 0
+    print(__doc__)
+    return 1
+
+if __name__ == "__main__":
+    sys.exit(main())

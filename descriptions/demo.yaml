@@ -9,7 +9,7 @@ contract_version: 1
 
 compartments:
   - name: monitor
-    text_base:  0x08003000
+    text_base:  0x08004000
     text_size:  0x2000
     sram_base:  0x20004000
     sram_size:  0x2000
