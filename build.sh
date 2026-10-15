@@ -14,6 +14,7 @@ $CC -c ../core/frame.c -o frame.o
 $CC -c ../core/flash.c -o flash.o
 $CC -c ../core/sha256.c -o sha256.o
 $CC -c ../core/compartment.c -o compartment.o
+python3 ../tools/sign_module.py --emit-header >/dev/null
 $CC -Os -c ../modules/supervisor.c -o main_pmp.o
 $CC -c ../modules/monitor.c -o monitor.o
 $CC -O0 -c ../modules/attacker.c -o attacker.o   # attacker stays -O0 (matches the published image)

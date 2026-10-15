@@ -7,6 +7,7 @@ CC="clang --target=riscv32 -march=rv32imafc -mabi=ilp32 -mno-relax -msmall-data-
 LLD="${LLD:-$HOME/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld}"
 $CC -c ../qemu/main_qemu.c -o main_qemu.o
 $CC -c ../qemu/report.c -o report.o
+python3 ../tools/sign_module.py --emit-header >/dev/null
 $CC -Os -c ../modules/supervisor.c -o main_pmp.o
 $CC -c ../modules/monitor.c -o monitor.o
 $CC -O0 -c ../modules/attacker.c -o attacker.o
