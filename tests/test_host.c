@@ -314,6 +314,49 @@ int main(void) {
         }
     }
 
+    /* type gate (E27): LDX needs a context pointer as its base; ALU
+     * over the pointer is rejected; helpers preserve registers */
+    {
+        /* scalar used as an LDX base: a load-time reject, not a
+         * run-time MEM fault */
+        static const uint64_t scalarbase[] = {
+            MOV64I(2, 5), LDXB(0, 2, 0), EXIT()
+        };
+        check_desc("typegate: scalar as LDX base", ic_program_check(scalarbase, 3), IC_ERR_VALIDATE);
+
+        /* the ctx pointer used as ALU operand: rejected (pointer
+         * arithmetic is not in this ISA subset) */
+        static const uint64_t ctxalu[] = {
+            ADD64I(1, 1), LDXB(0, 1, 0), EXIT()
+        };
+        check_desc("typegate: ALU over ctx", ic_program_check(ctxalu, 3), IC_ERR_VALIDATE);
+
+        /* the pointer survives to the LDX when untouched */
+        static const uint64_t ctxok[] = { LDXB(0, 1, 0), EXIT() };
+        check_desc("typegate: ctx as LDX base ok", ic_program_check(ctxok, 2), IC_OK);
+
+        /* helpers preserve registers: r2 written before the call is
+         * still a usable scalar after it */
+        static const uint64_t helperkeep[] = {
+            LDXB(2, 1, 0), CALL(1), JEQ64I(2, 0, 2),
+            MOV64I(0, 1), EXIT(), MOV64I(0, 0), EXIT()
+        };
+        check_desc("typegate: helper preserves r2", ic_program_check(helperkeep, 7), IC_OK);
+
+        /* r1 stays the context across a call: LDX on it still legal */
+        static const uint64_t ctxacross[] = {
+            CALL(1), LDXB(0, 1, 0), EXIT()
+        };
+        check_desc("typegate: ctx across call", ic_program_check(ctxacross, 3), IC_OK);
+
+        /* a scalar copied from the ctx is a scalar, not a pointer:
+         * LDX on it is rejected */
+        static const uint64_t movctx[] = {
+            MOV64(2, 1), LDXB(0, 2, 0), EXIT()
+        };
+        check_desc("typegate: MOV copies lose ctxness", ic_program_check(movctx, 3), IC_ERR_VALIDATE);
+    }
+
     /* frame machine (core/frame.c): the wire rules, no hardware */
     {
         uint8_t buf[64];

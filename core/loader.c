@@ -68,19 +68,33 @@ static int opcode_known(uint8_t op) {
     }
 }
 
-/* ---- register gate ----
- * A register must be written before any instruction reads it; r1 arrives
- * holding the context pointer. The interpreter zeroes the register file
- * at entry, so this gate is hygiene — programs must not lean on that
- * zeroing — and it pins two more classes at load: division by a known-
- * zero immediate, and control falling off the image (a run-time PC
- * fault). Joins intersect: a register is live into a program point only
- * when every path there wrote it last, so the analysis is a worklist to
- * a fixed point over the CFG (in-states only ever shrink). r10 stays
+/* ---- register gate with types ----
+ * A register must be written before any instruction reads it, and LDX
+ * requires a context pointer as its base: a scalar used as an address
+ * is a load-time reject, not a run-time fault. Types are 2 bits per
+ * register packed in a u32 — 00 BOTTOM (never written), 01 SCALAR,
+ * 10 PTR_CTX — so the whole register file is one word. r1 arrives as
+ * PTR_CTX; PTR_CTX never propagates: any ALU over it is rejected (the
+ * address arithmetic this ISA subset needs is the LDX offset itself),
+ * and a join intersects like the written-mask it replaces, so the
+ * worklist and its fixed point carry over unchanged. r10 stays
  * writable: writing it faults FP at run, which the rollback drill
  * depends on, and no later read can observe the write. */
 
-#define REGS_ALL 0x7FFu                       /* r0..r10 */
+#define T_BOTTOM 0x0u
+#define T_SCALAR 0x1u
+#define T_CTX    0x2u
+#define T_MASK   0x3u
+
+static uint32_t reg_type(uint32_t st, uint8_t r) {
+    return (st >> (2u * r)) & T_MASK;
+}
+
+static uint32_t set_type(uint32_t st, uint8_t r, uint32_t t) {
+    return (st & ~(T_MASK << (2u * r))) | (t << (2u * r));
+}
+
+#define SCALARS_ALL 0x155555u                 /* r0..r10 all SCALAR */
 
 static uint32_t insn_reads(uint64_t e) {
     uint8_t op  = (uint8_t)(e & 0xffu);
@@ -145,31 +159,66 @@ static int insn_succ(uint64_t e, uint32_t pc, uint32_t succ[2]) {
 static ic_status check_regs(const uint64_t *ins, uint32_t cnt) {
     uint32_t in_m[IC_PROG_MAX_INSNS];
     uint8_t pending[IC_PROG_MAX_INSNS];
+    /* lattice: per register 00 BOTTOM (unwritten on some path), 01
+     * SCALAR, 10 PTR_CTX, 11 TOP (unconstrained — the optimistic
+     * start that lets loop heads converge; & meets it down). */
     for (uint32_t i = 0; i < cnt; i++) {
-        in_m[i] = REGS_ALL;                       /* optimistic */
+        in_m[i] = 0xFFFFFFFFu;                    /* every reg TOP */
         pending[i] = 1u;
     }
-    in_m[0] = 1u << 1;                            /* r1 = ctx at entry */
+    {   /* entry: r1 = ctx pointer, every other register BOTTOM */
+        uint32_t entry = 0u;                      /* all BOTTOM */
+        in_m[0] = set_type(entry, 1, T_CTX);
+    }
     for (;;) {
         uint32_t pc = cnt;
         for (uint32_t i = 0; i < cnt; i++)
             if (pending[i]) { pc = i; break; }
         if (pc == cnt) break;                     /* fixed point */
         pending[pc] = 0;
-        if ((in_m[pc] & insn_reads(ins[pc])) != insn_reads(ins[pc]))
-            return IC_ERR_VALIDATE;
         {
-            uint8_t op = (uint8_t)(ins[pc] & 0xffu);
+            uint64_t e = ins[pc];
+            uint8_t op  = (uint8_t)(e & 0xffu);
+            uint8_t dst = (uint8_t)((e >> 8) & 0x0fu);
+            uint8_t src = (uint8_t)((e >> 12) & 0x0fu);
             uint8_t cls = op & 0x07u, hi = op & 0xf0u;
+            uint32_t st = in_m[pc];
+            /* every register this insn reads must be written (BOTTOM
+             * fails) and carry a type the insn accepts */
+            {
+                uint32_t reads = insn_reads(e);
+                for (uint8_t r = 0; r < 11u; r++) {
+                    if (!(reads & (1u << r))) continue;
+                    uint32_t t = reg_type(st, r);
+                    if (t == T_BOTTOM) return IC_ERR_VALIDATE;
+                    if (cls == 0x01u && t != T_CTX)
+                        return IC_ERR_VALIDATE;   /* LDX base must be ctx */
+                    if ((cls == 0x04u || cls == 0x07u) && t == T_CTX)
+                        return IC_ERR_VALIDATE;   /* ALU over ctx: reject */
+                }
+            }
             if ((cls == 0x04u || cls == 0x07u) &&
                 (hi == 0x30u || hi == 0x90u) && !(op & 0x08u) &&
-                ((ins[pc] >> 32) & 0xffffffffu) == 0u)
+                ((e >> 32) & 0xffffffffu) == 0u)
                 return IC_ERR_VALIDATE;           /* div/mod by imm 0 */
-        }
-        {
-            uint32_t out = in_m[pc] | insn_writes(ins[pc]);
+            /* out-state: writes give SCALAR, call clobbers the caller-
+             * saved convention, everything else carries over */
+            uint32_t out = st;
+            {
+                uint32_t writes = insn_writes(e);
+                for (uint8_t r = 0; r < 11u; r++) {
+                    if (writes & (1u << r))
+                        out = set_type(out, r, T_SCALAR);
+                }
+                if ((cls == 0x05u || cls == 0x06u) && hi == 0x80u) {
+                    /* this interpreter's helpers touch only the map
+                     * and r0 — every register is preserved except the
+                     * return value */
+                    out = set_type(out, 0, T_SCALAR);
+                }
+            }
             uint32_t succ[2];
-            int ns = insn_succ(ins[pc], pc, succ);
+            int ns = insn_succ(e, pc, succ);
             for (int k = 0; k < ns; k++) {
                 if (succ[k] >= cnt) return IC_ERR_VALIDATE;
                 {
