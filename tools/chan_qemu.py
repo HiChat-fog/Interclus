@@ -52,6 +52,7 @@ def main():
               + hashlib.sha256(                   # valid trailer over a
                   struct.pack("<II", 1, 1)        # body the pins reject
                   + struct.pack("<Q", BADSTAT[0])).digest()),
+        frame(0xD, b"\x00"),                     # F: status window query
     ]
     p = subprocess.Popen(
         ["qemu-system-riscv32", "-M", "virt", "-bios", "none",
@@ -63,29 +64,64 @@ def main():
     log_lines = []
     reports = [0]
     verdict = [None]
+    status_seen = [None]
+    buf = bytearray()
 
     def watch():
-        # the single reader: everything the firmware prints lands here;
-        # the feeder syncs on round reports, the main loop judges
+        # byte-stream reader: binary status replies are carved out of
+        # the stream first (their payload can contain newlines), then
+        # the remaining text is split into lines for report syncing
         while True:
-            line = p.stdout.readline()
-            if not line:
+            try:
+                chunk = p.stdout.read1(4096)
+            except (OSError, ValueError):
                 break
-            log_lines.append(line.decode("utf-8", "replace"))
-            if b"verdicts:" in line:
-                reports[0] += 1
-            if b"== CHAN PASS ==" in line:
-                verdict[0] = 0
-            elif b"== CHAN FAIL ==" in line:
-                verdict[0] = 1
+            if not chunk:
+                break
+            buf.extend(chunk)
+            while True:
+                i = buf.find(b"\x7e\x7e")
+                if i < 0 or len(buf) < i + 5:
+                    break
+                ln = struct.unpack_from("<H", buf, i + 3)[0]
+                if ln > 600:
+                    del buf[:i + 1]
+                    continue
+                if len(buf) < i + 5 + ln + 1:
+                    break
+                body = buf[i + 2:i + 5 + ln]
+                if ((sum(body) + buf[i + 5 + ln]) & 0xFF) == 0 and \
+                        body[0] == 0x0D:
+                    n = min(96, (ln - 4) // 4)
+                    status_seen[0] = [struct.unpack_from(
+                        "<I", body, 7 + 4 * k)[0] for k in range(n)]
+                    del buf[:i + 5 + ln + 1]
+                elif buf[i + 5 + ln] != 0 and ((sum(body) +
+                                                buf[i + 5 + ln]) & 0xFF):
+                    del buf[:i + 1]
+                else:
+                    del buf[:i + 5 + ln + 1]
+            while True:
+                j = buf.find(b"\n")
+                if j < 0:
+                    break
+                line = bytes(buf[:j + 1])
+                del buf[:j + 1]
+                log_lines.append(line.decode("utf-8", "replace"))
+                if b"verdicts:" in line:
+                    reports[0] += 1
+                if b"== CHAN PASS ==" in line:
+                    verdict[0] = 0
+                elif b"== CHAN FAIL ==" in line:
+                    verdict[0] = 1
 
     threading.Thread(target=watch, daemon=True).start()
 
     def feed():
         # A rides the boot window; frames B..E each wait until the
         # round count advances past the previous frame's round
-        waits = [0, 1, 2, 3, 3]   # B after r1, C after r2, D and E
-        for k, f in enumerate(frames):  # after r3 (state2 drains both)
+        waits = [0, 1, 2, 3, 3, 3]  # B/C/D/E/F: round-synced
+        for k, f in enumerate(frames):
             while k and reports[0] < waits[k]:
                 if p.poll() is not None or verdict[0] is not None:
                     return
@@ -111,13 +147,24 @@ def main():
     except subprocess.TimeoutExpired:
         p.kill()
     time.sleep(0.3)
+    print("reports seen:", reports[0], "lines:", len(log_lines))
     if verdict[0] is None:
         print("".join(log_lines))
         print("timeout: no verdict line")
         return 2
     print("".join(log_lines[-10:]))
-    print("RESULT:", "PASS ✅" if verdict[0] == 0 else "FAIL ❌")
-    return verdict[0]
+    ok = verdict[0] == 0
+    if status_seen[0] is None:
+        print("status: no reply frame")
+        ok = False
+    else:
+        gate = status_seen[0][88]
+        print(f"status: n={len(status_seen[0])} w0={status_seen[0][0]:#x} "
+              f"w1={status_seen[0][1]:#x} w88={gate:#x} "
+              f"w16={status_seen[0][16]:#x}")
+        ok = ok and gate == 0xC0DE0000
+    print("RESULT:", "PASS ✅" if ok else "FAIL ❌")
+    return 0 if ok else 1
 
 if __name__ == "__main__":
     sys.exit(main())

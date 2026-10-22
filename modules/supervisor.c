@@ -16,6 +16,9 @@ void sha256(const uint8_t *data, uint32_t len, uint8_t out[32]);
 
 #define MO_SHU  0x5741524Du
 #define MAX_SWARM 64u
+/* a compartment's slice: overrunning this is a strike, exactly like a
+ * fault (v1.1 has no pause/resume, so the overrunner is evicted) */
+#define BUDGET_TICKS 2000000u
 #ifdef QEMU_TARGET
 #include "../qemu/report.h"
 #endif
@@ -149,6 +152,7 @@ static void load_program(void) {
     STATUS[S_HREJ] = 0u;
     STATUS[S_ROLL] = 0u;
     STATUS[S_REARM] = 0u;
+    STATUS[S_PREEMPT] = 0u;
     if (area[0] != PROG_MAGIC) return;
     cnt = area[1];
     if (!cnt || cnt > IC_PROG_MAX_INSNS) { STATUS[S_LOAD] = 2u; return; }
@@ -210,6 +214,7 @@ void boot_main(void) {
         *q = 0;
     }
     TIMER_INIT();
+    BUDGET_INIT();
     uart_init();
     uart_puts("interclus\n");
     {
@@ -545,6 +550,27 @@ int chan_poll(uart_frame_rx *rx) {
             ((volatile uint8_t *)MAILBOX)[i] = g_chan_stage[i];
         return 1;
     }
+    if (rx->type == FRAME_STATUS) {
+        /* observability without a debugger: the whole guarded STATUS
+         * window goes back over the same wire. Window 0 is the core
+         * table; the reply is [window:1][words LE]. Read-only — no
+         * schedule side effects. */
+        volatile uint32_t *sw = STATUS;
+        volatile uint8_t *out = (volatile uint8_t *)g_chan_stage;
+        if (n < 1u) return 0;
+        if (g_chan_stage[0] != 0u) return 4;
+        out[0] = 0u; out[1] = 0u; out[2] = 0u; out[3] = 0u;
+        for (unsigned i = 0; i < STATUS_WORDS; i++) {
+            uint32_t v = sw[i];
+            out[4u + 4u * i + 0u] = (uint8_t)v;
+            out[4u + 4u * i + 1u] = (uint8_t)(v >> 8);
+            out[4u + 4u * i + 2u] = (uint8_t)(v >> 16);
+            out[4u + 4u * i + 3u] = (uint8_t)(v >> 24);
+        }
+        uart_send_frame(FRAME_STATUS, (const uint8_t *)g_chan_stage,
+                        4u + STATUS_WORDS * 4u);
+        return 4;
+    }
     if (rx->type == FRAME_REARM) {
         /* operator re-arms a slot: the eviction is cleared and the slot
          * goes live again. A human decision, never automatic (v1.1);
@@ -589,6 +615,7 @@ static void enter_checked(unsigned i) {
     if (compartment_evicted(i)) {
         for (;;) heartbeat();
     }
+    BUDGET_ARM(BUDGET_TICKS);
     compartment_enter(i);
 }
 
@@ -681,7 +708,9 @@ static void native_done(uint32_t proof) {
  * fault ends its lifetime. The trap path already saved the frame into the
  * TCB, wiped the register file, and logged mcause/mtval in the ring. */
 void supervisor_fault(uint32_t yuanyin, uint32_t zhi) {
-    (void)yuanyin; (void)zhi;
+    (void)zhi;
+    if (yuanyin & 0x80000000u)
+        STATUS[S_PREEMPT]++;          /* timer fire: slice overrun */
     compartment_evict(cur_comp);
     if (g_phase == 4) {
         atk_advance();

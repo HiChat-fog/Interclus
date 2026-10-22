@@ -55,3 +55,5 @@ jobs:
           grep -q "== PERSIST PASS ==" persist.log
           timeout 30 qemu-system-riscv32 -M virt -bios none -kernel build/fw_trust.elf -display none -serial stdio -monitor none < /dev/null | tee trust.log
           grep -q "== TRUST PASS ==" trust.log
+          timeout 30 qemu-system-riscv32 -M virt -bios none -kernel build/fw_budget.elf -display none -serial stdio -monitor none < /dev/null | tee budget.log
+          grep -q "== BUDGET PASS ==" budget.log

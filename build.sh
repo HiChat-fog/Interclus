@@ -14,7 +14,6 @@ $CC -c ../core/frame.c -o frame.o
 $CC -c ../core/flash.c -o flash.o
 $CC -c ../core/sha256.c -o sha256.o
 $CC -c ../core/compartment.c -o compartment.o
-$CC -Os -c ../modules/supervisor.c -o main_pmp.o
 $CC -c ../modules/monitor.c -o monitor.o
 $CC -O0 -c ../modules/attacker.c -o attacker.o   # attacker stays -O0 (matches the published image)
 $CC -c ../modules/examples/native_demo.c -o native_demo.o -DNAT_SRAM_BASE=0x2000B000
@@ -37,9 +36,14 @@ $CC -c ../modules/examples/native_trap.c -o native_trap_s1.o -DNAT_SRAM_BASE=0x2
 $LLD -flavor gnu -T ../modules/native.ld --defsym NAT_TEXT_BASE=0x2000C000 \
     -nostdlib -o native_trap_s1.elf native_trap_s1.o
 riscv64-unknown-elf-objcopy -O binary --only-section=.text native_trap_s1.elf native_trap_s1.bin
+$CC -c ../modules/examples/native_spin.c -o native_spin_s1.o -DNAT_SRAM_BASE=0x2000D000
+$LLD -flavor gnu -T ../modules/native.ld --defsym NAT_TEXT_BASE=0x2000C000 \
+    -nostdlib -o native_spin_s1.elf native_spin_s1.o
+riscv64-unknown-elf-objcopy -O binary --only-section=.text native_spin_s1.elf native_spin_s1.bin
 riscv64-unknown-elf-objcopy -I binary -O elf32-littleriscv -B riscv \
     --rename-section .data=.native_blob,alloc,load,readonly,contents \
     native_demo.bin native_blob.o
+$CC -Os -c ../modules/supervisor.c -o main_pmp.o
 python3 ../tools/sign_module.py --emit-header >/dev/null
 $LLD -flavor gnu -T ../modules/board.ld -nostdlib -o fw_pmp.elf \
     startup.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o compartment.o native_blob.o

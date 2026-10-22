@@ -85,6 +85,7 @@ void compartment_enter(unsigned i) {
         "li   t2, 0x21800\n"          /* MPP | MPRV */
         "not  t2, t2\n"
         "and  t1, t1, t2\n"
+        "ori  t1, t1, 0x80\n"         /* MPIE: budget IRQ live in U-mode */
         "csrw mstatus, t1\n"
         "lw   ra, 4(t0)\n"
         "lw   gp, 12(t0)\n"

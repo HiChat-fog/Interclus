@@ -57,6 +57,14 @@ def main():
     trap_s0 = _bin("native_trap_qemu.bin")
     imgs.append(("native_trap (qemu, slot0)", pend_image(
         2, len(trap_s0), 0, 0, trap_s0)))
+    for name, fname in (
+            ("native_spin_s1 (qemu, slot1)", "native_spin_s1_qemu.bin"),
+            ("native_spin_s1 (board, slot1)", "native_spin_s1.bin")):
+        try:
+            spin = _bin(fname)
+        except FileNotFoundError:
+            continue
+        imgs.append((name, pend_image(2, len(spin), 0, 1, spin)))
     for name, fname, slot in (
             ("native_variant_s1 (board, slot1)", "native_variant_s1.bin", 1),
             ("native_variant (board, slot0)", "native_variant.bin", 0),

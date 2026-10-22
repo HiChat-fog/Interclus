@@ -42,13 +42,16 @@ static uart_frame_rx rx;
  * 1..4 nothing else consumes the console (the service loop starts at
  * native_done, after this drill), so this direct drain is the only
  * reader — no double-consumer. */
+static volatile int last_ev;
 static int drain(int want) {
     int got = 0;
     uint32_t t0 = TIMER_NOW();
     while ((uint32_t)(TIMER_NOW() - t0) < DRAIN_TICKS && got < want) {
         int ev = chan_poll(&rx);
+        last_ev = ev;
         if (ev == 1) got++;
         else if (ev == 2) { hot_swap(); got++; }
+        else if (ev == 4) got++;          /* status reply sent */
     }
     return got;
 }
@@ -99,6 +102,22 @@ void sweep_next(void) {
         if (STATUS[S_HREJ] != 1u) ok = 0;                   /* gates said no */
         if (STATUS[S_HLOAD] != 1u) ok = 0;                  /* and nothing moved */
         if (MON_PROG_CNT[0] != pass_all_cnt) ok = 0;
+        {   /* a status request must be answered on the wire without
+             * touching the schedule */
+            int ev = drain(1);
+            if (last_ev != 4) ok = 0;   /* the reply is the event */
+        }
+        if (!ok) {
+            uart_puts("\n== CHAN FAIL ==\n[load=");
+            uart_putdec(STATUS[S_LOAD]);
+            uart_puts(" hload=");
+            uart_putdec(STATUS[S_HLOAD]);
+            uart_puts(" hrej=");
+            uart_putdec(STATUS[S_HREJ]);
+            uart_puts("]\n");
+            qemu_exit(1);
+        }
+        hot_round();
     } else {
         ok = STATUS[S_LOAD] == 1u && STATUS[S_HLOAD] == 1u &&
              STATUS[S_HREJ] == 1u && verdicts_ok() &&

@@ -25,6 +25,25 @@
 #define TIMER_NOW()   \
     ({ uint32_t t; __asm__ volatile ("rdtime %0" : "=r"(t)); t; })
 
+/* E28 budget: the machine timer interrupt. QEMU virt's CLINT at
+ * 0x02000000: mtime at +0xBFF8, hart 0's mtimecmp at +0x4000. The
+ * supervisor arms a fresh deadline before every compartment entry; a
+ * fire means the running compartment overran its budget. M-mode runs
+ * with MIE=0, so a spent deadline never leaks into supervisor code. mie.MTIE (bit 7) is the interrupt
+ * enable; mstatus.MIE is left to compartment_enter. */
+#define BUDGET_INIT() \
+    do { __asm__ volatile ("csrs mie, %0" :: "r" (1u << 7)); } while (0)
+#define BUDGET_ARM(ticks) \
+    do { \
+        volatile uint32_t *cmp = (volatile uint32_t *)0x02004000u; \
+        volatile uint32_t *mt = (volatile uint32_t *)0x0200BFF8u; \
+        uint32_t now = mt[0], hi = mt[1]; \
+        uint32_t lo = now + (uint32_t)(ticks); \
+        if (lo < now) hi++; \
+        cmp[1] = 0xFFFFFFFFu;        /* hi first: no spurious match */ \
+        cmp[0] = lo; \
+        cmp[1] = hi; \
+    } while (0)
 #else
 
 #define MON_TEXT   0x08004000u
@@ -48,6 +67,14 @@
 #define STK_CNT  (*(volatile uint32_t *)0xE000F008u)
 #define TIMER_INIT()  do { STK_CTLR |= 1u; } while (0)
 #define TIMER_NOW()   (STK_CNT)
+
+/* E28 budget on the board: SysTick compare + interrupt enable. The
+ * STK interrupt number is core-specific; the trap path only relies on
+ * mcause's interrupt bit, so whatever vector the core reports lands in
+ * the same eviction path. Verify the CMP register offset on hardware. */
+#define STK_CMP  (*(volatile uint32_t *)0xE000F00Cu)
+#define BUDGET_INIT()  do { STK_CTLR |= (1u << 1); } while (0)
+#define BUDGET_ARM(ticks)  do { STK_CMP = STK_CNT + (ticks); } while (0)
 
 #endif
 
@@ -140,10 +167,14 @@
 #define S_NSLOT   97u   /* native slot table: index wired into comp 2 */
 #define S_REARM   98u   /* operator re-arm commands accepted */
 #define S_FPROG   99u   /* last flash mirror write: 0 ok */
+#define S_PREEMPT 100u  /* compartments killed for overrunning budget */
 
-/* channel frame types beyond the loader set (E24) */
+/* channel frame types beyond the loader set (E24/E29) */
 #define FRAME_TELE   0xFu   /* device -> host: fault evidence */
 #define FRAME_REARM  0xEu   /* host -> device: operator re-arms slot k */
+#define FRAME_STATUS 0xDu   /* host -> device: read the STATUS window;
+                               device -> host: [window:4][words LE] */
+#define STATUS_WORDS 96u    /* the guarded STATUS window, words 0..95 */
 
 /* PMP NAPOT encodings, derived from the map */
 #define NAPOT(base, size) (((base) >> 2) | ((size) >> 3) - 1u)

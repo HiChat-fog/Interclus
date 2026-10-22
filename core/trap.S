@@ -161,6 +161,9 @@ trap_entry:
     csrr t1, mstatus
     li   t2, 0x1800
     or   t1, t1, t2
+    li   t2, 0x80
+    not  t2, t2
+    and  t1, t1, t2             /* MPIE=0: M-mode never takes the IRQ */
     csrw mstatus, t1
     mv   t0, x0
     mv   t1, x0
@@ -275,6 +278,9 @@ trap_entry:
     csrr t1, mstatus
     li   t2, 0x1800
     or   t1, t1, t2
+    li   t2, 0x80
+    not  t2, t2
+    and  t1, t1, t2             /* MPIE=0: M-mode never takes the IRQ */
     csrw mstatus, t1
     mret
 
