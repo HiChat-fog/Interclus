@@ -4,24 +4,12 @@ through the same gates, proof returns without any re-install.
 
   cd tools && python3 persist_board.py
 """
-import struct, sys, time
+import sys, time
 from inject_swarm import wlink, read_words
-from uart_frame import enc
+from pend import stage_native
 
 BASE = 0x20000100
-PROG_PEND = 0x20003800
 S_NAT2, S_NSLOT = 92, 97
-
-def stage_native(code, entry=0, slot=0):
-    blob = struct.pack("<IIII", len(code), 2, entry, slot) + code
-    wlink("write-mem", hex(PROG_PEND), hex(len(code)))
-    wlink("write-mem", hex(PROG_PEND + 4), "0x2")
-    wlink("write-mem", hex(PROG_PEND + 8), hex(entry))
-    wlink("write-mem", hex(PROG_PEND + 12), hex(slot))
-    for i in range(0, len(blob) - 16, 4):
-        wlink("write-mem", hex(PROG_PEND + 16 + i),
-              hex(struct.unpack_from("<I", blob, 16 + i)[0]))
-    wlink("write-mem", hex(PROG_PEND + 0x208), "0x444E4550")
 
 def snap():
     w = read_words(BASE, 100)
@@ -34,7 +22,11 @@ def main():
     stage_native(natvar, slot=1)
     time.sleep(4)
     nat2, nslot = snap()
-    print(f"1 install slot1: NAT2={hex(nat2 or 0)} NSLOT={nslot}")
+    mir = read_words(0x0800A400, 1).get(0x0800A400, 0)
+    print(f"1 install slot1: NAT2={hex(nat2 or 0)} NSLOT={nslot} "
+          f"MIR={hex(mir)}")
+    if mir != 0x4D495234:
+        print("   mirror page is blank: the M-mode program path did not land")
     ok &= (nat2 or 0) == 0xC0DE0003 and nslot == 1
 
     # power cycle: reset is the closest a drill gets without a plug switch;

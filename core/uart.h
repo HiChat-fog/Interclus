@@ -10,6 +10,7 @@
 #define UART_FRAME_MAX 520u
 
 void uart_init(void);
+int  uart_tx_ready(void);      /* TX buffer empty: putc will not stall */
 void uart_putc(char c);
 void uart_puts(const char *s);
 void uart_puthex(uint32_t v);
@@ -46,5 +47,12 @@ unsigned uart_poll_frame(uint8_t *dst, unsigned cap, uart_frame_rx *st);
 /* One frame out: sync, type, len16, payload, sum8 — the inverse of
  * uart_frame_step. Blocking TX, payload at most 64 bytes. */
 void uart_send_frame(uint8_t type, const uint8_t *payload, unsigned len);
+
+/* Best-effort variant: same frame, but gives up after `budget` timer
+ * ticks if the wire never drains. Returns 1 sent, 0 abandoned. The
+ * eviction path uses this — a stalled receiver must never park the
+ * supervisor inside fault handling. */
+int uart_send_frame_limited(uint8_t type, const uint8_t *payload,
+                            unsigned len, uint32_t budget);
 
 #endif

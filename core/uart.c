@@ -12,8 +12,10 @@
 #define UART_TX ((volatile uint8_t *)0x10000000u)
 #define UART_LSR ((volatile uint8_t *)0x10000005u)
 #define LSR_DR   (1u << 0)
+#define LSR_THRE (1u << 5)
 
 void uart_init(void) { }
+int uart_tx_ready(void) { return (*UART_LSR & LSR_THRE) != 0; }
 void uart_putc(char c) { UART_TX[0] = (uint8_t)c; }
 int uart_getc(void) {
     if (!(*UART_LSR & LSR_DR)) return -1;
@@ -41,6 +43,7 @@ void uart_init(void) {
     USART1_CTLR1 = (1u << 13) | (1u << 3) | (1u << 2);  /* UE | TE | RE */
 }
 
+int uart_tx_ready(void) { return (USART1_STATR & STATR_TXE) != 0; }
 void uart_putc(char c) {
     while (!(USART1_STATR & STATR_TXE)) { }
     USART1_DATAR = (uint8_t)c;
@@ -81,6 +84,29 @@ unsigned uart_poll_frame(uint8_t *dst, unsigned cap, uart_frame_rx *st) {
             if (n) return n;
         }
     }
+}
+
+static int putc_bounded(char c, uint32_t t0, uint32_t budget) {
+    while (!uart_tx_ready()) {
+        if ((uint32_t)(TIMER_NOW() - t0) > budget) return 0;
+    }
+    uart_putc(c);
+    return 1;
+}
+
+int uart_send_frame_limited(uint8_t type, const uint8_t *payload,
+                            unsigned len, uint32_t budget) {
+    uint8_t hdr[5] = { 0x7E, 0x7E, type,
+                       (uint8_t)(len & 0xFFu), (uint8_t)(len >> 8) };
+    unsigned sum = type + (len & 0xFFu) + (len >> 8);
+    uint32_t t0 = TIMER_NOW();
+    for (unsigned i = 0; i < 5u; i++)
+        if (!putc_bounded((char)hdr[i], t0, budget)) return 0;
+    for (unsigned i = 0; i < len; i++) {
+        if (!putc_bounded((char)payload[i], t0, budget)) return 0;
+        sum += payload[i];
+    }
+    return putc_bounded((char)((-sum) & 0xFFu), t0, budget);
 }
 
 void uart_send_frame(uint8_t type, const uint8_t *payload, unsigned len) {

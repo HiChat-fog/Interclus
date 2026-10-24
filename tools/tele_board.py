@@ -7,25 +7,12 @@ carries nothing of the board's UART. Verification goes through wlink.
   cd tools && python3 tele_board.py /dev/ttyUSB0
 """
 import struct, sys, time
-from inject_swarm import wlink, read_words
-from uart_frame import enc
+from inject_swarm import read_words
+from pend import stage_native
 
 BASE = 0x20000100
-PROG_PEND = 0x20003800
-PEND_MAGIC = 0x444E4550
 S_NAT2, S_REARM, S_NSLOT = 92, 98, 97
 TELE, REARM = 0xF, 0xE
-
-def stage_native(code, entry=0, slot=0):
-    blob = struct.pack("<IIII", len(code), 2, entry, slot) + code
-    wlink("write-mem", hex(PROG_PEND), hex(len(code)))
-    wlink("write-mem", hex(PROG_PEND + 4), "0x2")
-    wlink("write-mem", hex(PROG_PEND + 8), hex(entry))
-    wlink("write-mem", hex(PROG_PEND + 12), hex(slot))
-    for i in range(0, len(blob) - 16, 4):
-        wlink("write-mem", hex(PROG_PEND + 16 + i),
-              hex(struct.unpack_from("<I", blob, 16 + i)[0]))
-    wlink("write-mem", hex(PROG_PEND + 0x208), hex(PEND_MAGIC))
 
 def wire_frame(ftype, payload):
     body = bytes([ftype]) + struct.pack("<H", len(payload)) + payload
@@ -36,13 +23,13 @@ def main():
     import serial
     ser = serial.Serial(port, 115200, timeout=0.2)
     natvar = open("../build/native_variant.bin", "rb").read()
-    badnat = bytearray(natvar)
-    badnat[0:8] = struct.pack("<II", 0x00000297, 0x10028067)
+    trap = open("../build/native_trap.bin", "rb").read()
     ok = True
+    base_slot = read_words(BASE + 4 * S_NSLOT, 1).get(BASE + 4 * S_NSLOT, 0)
 
     # 1. poison slot 0, wait for the eviction + telemetry (streaming
     # parser: frames may straddle read() chunk boundaries)
-    stage_native(bytes(badnat), slot=0)
+    stage_native(trap, slot=0)
     teles = []
     buf = bytearray()
     t0 = time.time()
@@ -72,7 +59,9 @@ def main():
         print(f"   tele: comp={t[1]} slot={t[2]} "
               f"mcause={int.from_bytes(t[4:8],'little'):#x} "
               f"mtval={int.from_bytes(t[8:12],'little'):#x}")
-    ok &= len(teles) == 1 and (nat2 or 0) == 0 and (nslot or 0) == 0xFFFFFFFF
+    # a live slot 1 was the last-known-good: the boundary remaps to it
+    want_slot = 1 if base_slot == 1 else 0xFFFFFFFF
+    ok &= len(teles) == 1 and (nat2 or 0) == 0 and (nslot or 0) == want_slot
 
     # 2. operator re-arm + trusted image, proof returns
     ser.write(wire_frame(REARM, struct.pack("<I", 0)))

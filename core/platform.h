@@ -44,6 +44,7 @@
         cmp[0] = lo; \
         cmp[1] = hi; \
     } while (0)
+#define BUDGET_ACK()  do { } while (0)
 #else
 
 #define MON_TEXT   0x08004000u
@@ -68,13 +69,37 @@
 #define TIMER_INIT()  do { STK_CTLR |= 1u; } while (0)
 #define TIMER_NOW()   (STK_CNT)
 
-/* E28 budget on the board: SysTick compare + interrupt enable. The
- * STK interrupt number is core-specific; the trap path only relies on
- * mcause's interrupt bit, so whatever vector the core reports lands in
- * the same eviction path. Verify the CMP register offset on hardware. */
-#define STK_CMP  (*(volatile uint32_t *)0xE000F00Cu)
-#define BUDGET_INIT()  do { STK_CTLR |= (1u << 1); } while (0)
-#define BUDGET_ARM(ticks)  do { STK_CMP = STK_CNT + (ticks); } while (0)
+/* E28 budget on the board: QingKe's SysTick is a 64-bit up counter —
+ * CTLR, SR, CNT(64) at +0x08, CMP(64) at +0x10 — and its interrupt is
+ * IRQ 12 through the PFIC, not a standard machine-timer interrupt. */
+#define STK_SR     (*(volatile uint32_t *)0xE000F004u)
+#define STK_CNT_HI (*(volatile uint32_t *)0xE000F00Cu)
+#define STK_CMP_LO (*(volatile uint32_t *)0xE000F010u)
+#define STK_CMP_HI (*(volatile uint32_t *)0xE000F014u)
+#define PFIC_IENR0 (*(volatile uint32_t *)0xE000E100u)
+#define PFIC_IRER0 (*(volatile uint32_t *)0xE000E180u)
+#define PFIC_IPRR0 (*(volatile uint32_t *)0xE000E280u)
+/* PFIC enables and the SysTick counter survive a core reset, so boot
+ * starts with the line masked; ARM re-enables it only after a future
+ * compare is installed and the stale pending bit is dropped. */
+#define BUDGET_INIT() do { \
+    PFIC_IRER0 = (1u << 12); \
+    STK_SR = 0u; \
+    STK_CTLR |= (1u << 1); \
+} while (0)
+#define BUDGET_ARM(ticks) do { \
+    uint32_t hi, lo0; \
+    do { hi = STK_CNT_HI; lo0 = STK_CNT; } while (hi != STK_CNT_HI); \
+    uint32_t lo = lo0 + (uint32_t)(ticks); \
+    if (lo < lo0) hi++; \
+    STK_CMP_HI = 0xFFFFFFFFu; \
+    STK_CMP_LO = lo; \
+    STK_CMP_HI = hi; \
+    STK_SR = 0u; \
+    PFIC_IPRR0 = (1u << 12); \
+    PFIC_IENR0 = (1u << 12); \
+} while (0)
+#define BUDGET_ACK()  do { STK_SR = 0u; PFIC_IPRR0 = (1u << 12); } while (0)
 
 #endif
 
@@ -168,6 +193,7 @@
 #define S_REARM   98u   /* operator re-arm commands accepted */
 #define S_FPROG   99u   /* last flash mirror write: 0 ok */
 #define S_PREEMPT 100u  /* compartments killed for overrunning budget */
+#define S_TXABORT 101u  /* telemetry frames abandoned: TX never drained */
 
 /* channel frame types beyond the loader set (E24/E29) */
 #define FRAME_TELE   0xFu   /* device -> host: fault evidence */

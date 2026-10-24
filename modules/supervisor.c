@@ -153,6 +153,7 @@ static void load_program(void) {
     STATUS[S_ROLL] = 0u;
     STATUS[S_REARM] = 0u;
     STATUS[S_PREEMPT] = 0u;
+    STATUS[S_TXABORT] = 0u;
     if (area[0] != PROG_MAGIC) return;
     cnt = area[1];
     if (!cnt || cnt > IC_PROG_MAX_INSNS) { STATUS[S_LOAD] = 2u; return; }
@@ -498,7 +499,11 @@ static void tele_fault(uint32_t slot) {
     for (int k = 0; k < 4; k++) p[8 + k] = (uint8_t)(g_ri_addr[i] >> (8 * k));
     p[12] = (uint8_t)g_nat_live;
     p[13] = (uint8_t)g_nat_retired;
-    uart_send_frame(FRAME_TELE, p, 16u);
+    /* best effort: a stalled receiver must never park the supervisor
+     * inside the eviction path — abandon the frame, the evidence stays
+     * in the TCB and the STATUS ring either way */
+    if (!uart_send_frame_limited(FRAME_TELE, p, 16u, 50000u))
+        STATUS[S_TXABORT]++;
 }
 
 /* E21 runtime channel: one console frame per call, non-blocking. The
@@ -709,8 +714,10 @@ static void native_done(uint32_t proof) {
  * TCB, wiped the register file, and logged mcause/mtval in the ring. */
 void supervisor_fault(uint32_t yuanyin, uint32_t zhi) {
     (void)zhi;
-    if (yuanyin & 0x80000000u)
+    if (yuanyin & 0x80000000u) {
+        BUDGET_ACK();
         STATUS[S_PREEMPT]++;          /* timer fire: slice overrun */
+    }
     compartment_evict(cur_comp);
     if (g_phase == 4) {
         atk_advance();
