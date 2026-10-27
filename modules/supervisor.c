@@ -7,6 +7,7 @@
 #include "../descriptions/demo.h"
 #include "policies/mavlink.h"
 #include "policies/screening.h"
+#include "../core/update.h"
 extern int flash_mirror_write(uint32_t slot, const uint8_t *code,
                               uint32_t len, uint32_t entry);
 extern uint32_t flash_mirror_read(uint32_t slot, uint8_t *out,
@@ -63,6 +64,10 @@ struct nat_slot {
 static struct nat_slot g_nat[2];
 static uint32_t g_nat_live;     /* slot index wired into compartment 2 */
 static uint32_t g_nat_retired;  /* no runnable native slot left */
+static update_rx g_update;
+static uint32_t g_update_hload;
+static uint32_t g_update_hrej;
+static void update_send_reply(const update_reply *r);
 
 extern const uint8_t _binary_native_demo_bin_start[];
 extern const uint8_t _binary_native_demo_bin_end[];
@@ -205,6 +210,7 @@ void boot_main(void) {
 #endif
     }
     STATUS[S_GATE] = 0xC0DE0000u;
+    WDT_ARM();                     /* past the gate: runtime fails reboots */
     csr_write(0x340, (uint32_t)trap_sp0_top);   /* mscratch: fault scratch */
     STATUS[0] = 0xDEADBEEFu;
     STATUS[1] = 0xC0DE0008u;
@@ -244,6 +250,31 @@ void boot_main(void) {
 #endif
     uart_load();
     load_program();
+    WDT_FEED();
+    /* Boot is the one true transport reset: no half-finished transaction
+     * and no stale PEND image may survive into the new session. */
+    update_reset(&g_update);
+    g_update_hload = 0;
+    g_update_hrej = 0;
+    PROG_PEND_OK[0] = 0u;
+
+    {   /* E33: the verifier meets random images at boot — every round
+         * must return a verdict, never hang the device. The acceptance
+         * count is sanity: random 8-insn junk passes rarely. */
+        uint32_t st = 0xC0FFEE1u, acc = 0, rej = 0;
+        for (uint32_t r = 0; r < 2048u; r++) {
+            uint64_t ins[8];
+            for (int i = 0; i < 8; i++) {
+                st ^= st << 13; st ^= st >> 17; st ^= st << 5;
+                ins[i] = (uint64_t)st;
+                st ^= st << 13; st ^= st >> 17; st ^= st << 5;
+                ins[i] |= (uint64_t)st << 32;
+            }
+            if (ic_program_check(ins, 8) == IC_OK) acc++; else rej++;
+        }
+        STATUS[S_FUZZA] = acc;
+        STATUS[S_FUZZR] = rej;
+    }
 
     {   /* slot 0 serves the built-in demo blob; the bytes land once —
            U-mode cannot write its own text (PMP R/X), and the rollback
@@ -368,6 +399,9 @@ void supervisor_reset(void) {
 #else
 void supervisor_reset(void) {
 #endif
+    /* A schedule round is not a transport reset: an in-flight update must
+     * survive unrelated swarm commits and hot rounds. Only boot and ABORT
+     * discard transaction state. */
     g_phase = 1;
     g_input_sum = 0;
     g_stk0 = 0;
@@ -419,10 +453,21 @@ void hot_swap(void) {
     {
         /* the trailer digest rides after the payload; recompute over
          * everything before it, then require it pinned */
-        const uint8_t *img = (const uint8_t *)PROG_PEND_ADDR;
-        uint32_t body = (kind == PEND_NATIVE) ? 16u + w0 : 8u + w0 * 8u;
+        uint32_t body;
+        /* Validate the discriminant and multiply only after the bounded
+         * count check; malformed w0 must not wrap into the trust window. */
+        if (kind == PEND_NATIVE) {
+            if (!w0 || w0 > 0x1F0u) goto rej;
+            body = 16u + w0;
+        } else if (kind == PEND_EBPF) {
+            if (!w0 || w0 > IC_PROG_MAX_INSNS) goto rej;
+            body = 8u + w0 * 8u;
+        } else {
+            goto rej;
+        }
         if (body > 0x200u - SHA256_LEN || body < 16u) goto rej;
-        if (!trust_check(img, body, img + body)) goto rej;
+        if (!trust_check((const uint8_t *)PROG_PEND_ADDR, body,
+                         (const uint8_t *)PROG_PEND_ADDR + body)) goto rej;
     }
     if (kind == PEND_NATIVE) {
         uint32_t entry = pend[2];
@@ -486,6 +531,24 @@ rej:
     PROG_PEND_OK[0] = 0u;
 }
 
+int hot_update_finalize(void) {
+    update_reply reply;
+    uint32_t hload, hrej;
+    int accepted;
+    if (g_update.state != UPDATE_STATE_STAGED) return 0;
+    hload = STATUS[S_HLOAD];
+    hrej = STATUS[S_HREJ];
+    if (hload == g_update_hload && hrej == g_update_hrej) return 0;
+    accepted = (hload != g_update_hload && hrej == g_update_hrej);
+    update_finish(&g_update, accepted);
+    reply.id = g_update.id;
+    reply.next_seq = g_update.next_seq;
+    reply.code = accepted ? UPDATE_ACCEPT : UPDATE_REJECT;
+    reply.detail = accepted ? 0u : UPDATE_ERR_STATE;
+    update_send_reply(&reply);
+    return accepted ? 1 : -1;
+}
+
 /* E24 telemetry: fault evidence leaves the device as one frame. slot is
  * the native table entry (0xFF for the eBPF program), the rest is the
  * forensics chain verbatim. */
@@ -525,9 +588,39 @@ static uint32_t le32(const uint8_t *p) {
            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
+static void update_send_reply(const update_reply *r) {
+    uint8_t p[10];
+    uint16_t crc;
+    p[0] = r->code;
+    p[1] = (uint8_t)r->id;
+    p[2] = (uint8_t)(r->id >> 8);
+    p[3] = (uint8_t)(r->id >> 16);
+    p[4] = (uint8_t)(r->id >> 24);
+    p[5] = (uint8_t)r->next_seq;
+    p[6] = (uint8_t)(r->next_seq >> 8);
+    p[7] = r->detail;
+    crc = update_crc16(p, 8u);
+    p[8] = (uint8_t)crc;
+    p[9] = (uint8_t)(crc >> 8);
+    uart_send_frame_limited(FRAME_UPDATE_REPLY, p, 10u, 50000u);
+}
+
 int chan_poll(uart_frame_rx *rx) {
     unsigned n = uart_poll_frame(g_chan_stage, sizeof g_chan_stage, rx);
     if (!n) return 0;
+    if (rx->type == FRAME_UPDATE) {
+        update_reply reply;
+        int accepted = update_process(&g_update, g_chan_stage, n,
+                                     (volatile uint8_t *)PROG_PEND_ADDR,
+                                     PROG_PEND_OK, &reply);
+        update_send_reply(&reply);
+        if (accepted && reply.code == UPDATE_REPLY_STAGED) {
+            g_update_hload = STATUS[S_HLOAD];
+            g_update_hrej = STATUS[S_HREJ];
+            return 5;
+        }
+        return accepted ? 6 : 0;
+    }
     if (rx->type == 1u) {
         /* the payload is [PROG header][insns][32-byte digest]; the
          * digest stays in the frame — the gate recomputes over the
@@ -618,6 +711,8 @@ void hot_round(void) {
  * core silently inside the mechanism's fail-stop */
 static void enter_checked(unsigned i) {
     if (compartment_evicted(i)) {
+        STATUS[S_HALT] = 0x48414C54u;
+        STATUS[S_HALTC] = 0xEE00u | i;   /* schedule bug, not a victim */
         for (;;) heartbeat();
     }
     BUDGET_ARM(BUDGET_TICKS);
@@ -696,8 +791,10 @@ static void native_done(uint32_t proof) {
         uint32_t seen = STATUS[S_HLOAD];
         uart_frame_rx rx = { 0, 0, 0, 0, 0 };
         for (;;) {
+            WDT_FEED();
             int ev = chan_poll(&rx);
             hot_swap();
+            hot_update_finalize();
             if (STATUS[S_HLOAD] != seen) {
                 seen = STATUS[S_HLOAD];
                 hot_round();             /* noreturn: re-enters here */
@@ -746,11 +843,14 @@ void supervisor_fault(uint32_t yuanyin, uint32_t zhi) {
         }
         native_done(0u);             /* evicted native: nat2 stays 0 */
     } else {
-        for (;;) heartbeat();        /* monitor fault: fail-stop */
+        STATUS[S_HALT] = 0x48414C54u;
+        STATUS[S_HALTC] = ((g_phase & 0xFFu) << 24) | (yuanyin & 0xFFFFFFu);
+        for (;;) heartbeat();        /* monitor fault: no feed, dog reboots */
     }
 }
 
 void supervisor_resume(void) {
+    WDT_FEED();
     if (g_phase == 1) {                       
         uint32_t cyc = TIMER_NOW() - g_stk0;
         for (int i = 0; i < 6; i++) {

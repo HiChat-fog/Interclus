@@ -8,11 +8,12 @@ LLD="${LLD:-$HOME/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustli
 # 对象文件须以 monitor.o / attacker.o 基名参与链接（链接脚本按文件名分配舱室段）
 $CC -c ../startup.S -o startup.o
 $CC -c ../core/trap.S -o trap_pmp.o
-$CC -c ../core/loader.c -o loader.o
-$CC -c ../core/uart.c -o uart.o
+$CC -Oz -c ../core/loader.c -o loader.o
+$CC -Os -c ../core/uart.c -o uart.o
 $CC -c ../core/frame.c -o frame.o
 $CC -c ../core/flash.c -o flash.o
 $CC -c ../core/sha256.c -o sha256.o
+$CC -Oz -c ../core/update.c -o update.o
 $CC -c ../core/compartment.c -o compartment.o
 $CC -c ../modules/monitor.c -o monitor.o
 $CC -O0 -c ../modules/attacker.c -o attacker.o   # attacker stays -O0 (matches the published image)
@@ -37,16 +38,20 @@ $LLD -flavor gnu -T ../modules/native.ld --defsym NAT_TEXT_BASE=0x2000C000 \
     -nostdlib -o native_trap_s1.elf native_trap_s1.o
 riscv64-unknown-elf-objcopy -O binary --only-section=.text native_trap_s1.elf native_trap_s1.bin
 $CC -c ../modules/examples/native_spin.c -o native_spin_s1.o -DNAT_SRAM_BASE=0x2000D000
+$CC -c ../modules/examples/native_chaos.c -o native_chaos_s1.o -DNAT_SRAM_BASE=0x2000D000
+$LLD -flavor gnu -T ../modules/native.ld --defsym NAT_TEXT_BASE=0x2000C000 \
+    -nostdlib -o native_chaos_s1.elf native_chaos_s1.o
+riscv64-unknown-elf-objcopy -O binary --only-section=.text native_chaos_s1.elf native_chaos_s1.bin
 $LLD -flavor gnu -T ../modules/native.ld --defsym NAT_TEXT_BASE=0x2000C000 \
     -nostdlib -o native_spin_s1.elf native_spin_s1.o
 riscv64-unknown-elf-objcopy -O binary --only-section=.text native_spin_s1.elf native_spin_s1.bin
 riscv64-unknown-elf-objcopy -I binary -O elf32-littleriscv -B riscv \
     --rename-section .data=.native_blob,alloc,load,readonly,contents \
     native_demo.bin native_blob.o
-$CC -Os -c ../modules/supervisor.c -o main_pmp.o
 python3 ../tools/sign_module.py --emit-header >/dev/null
+$CC -Os -c ../modules/supervisor.c -o main_pmp.o
 $LLD -flavor gnu -T ../modules/board.ld -nostdlib -o fw_pmp.elf \
-    startup.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o compartment.o native_blob.o
+    startup.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o update.o compartment.o native_blob.o
 riscv64-unknown-elf-objcopy -O binary --only-section=.text --only-section=.monitor_text --only-section=.attacker_text --only-section=.native_blob fw_pmp.elf fw_pmp.bin
 $CC -c ../modules/pmp_probe.c -o pmp_probe.o
 $LLD -flavor gnu -T ../modules/probe.ld -nostdlib -o pmp_probe.elf pmp_probe.o

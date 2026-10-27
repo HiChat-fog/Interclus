@@ -14,6 +14,10 @@
 #include <stdint.h>
 #include "uart.h"
 
+/* Keep the byte-at-a-time parser deliberately pure: the runtime wrapper
+ * expires a stalled partial frame using its timer, while host tests can
+ * exercise this file without a platform clock. */
+
 unsigned uart_frame_step(uint8_t byte, uint8_t *dst, unsigned cap,
                          uart_frame_rx *st) {
     switch (st->phase) {

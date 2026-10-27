@@ -66,6 +66,7 @@ def main():
             continue
         imgs.append((name, pend_image(2, len(spin), 0, 1, spin)))
     for name, fname, slot in (
+            ("native_chaos_s1 (board, slot1)", "native_chaos_s1.bin", 1),
             ("native_variant_s1 (board, slot1)", "native_variant_s1.bin", 1),
             ("native_variant (board, slot0)", "native_variant.bin", 0),
             ("native_trap_s1 (board, slot1)", "native_trap_s1.bin", 1),
@@ -83,6 +84,11 @@ def main():
     imgs.append(("badrun (legal, runtime-FP)", pend_image(
         1, len(badrun), 0, 0,
         b"".join(struct.pack("<Q", e) for e in badrun))))
+    slow = [enc(0x05, 0, 0, -1, 0)]     # ja -1: legal self-loop, eats the
+                                         # whole step budget -> timer kill
+    imgs.append(("slowspin (legal, budget-killer)", pend_image(
+        1, len(slow), 0, 0,
+        b"".join(struct.pack("<Q", e) for e in slow))))
     if "--pass-all" in sys.argv:
         d = digest(imgs[0][1])
         print(d.hex())

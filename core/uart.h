@@ -8,6 +8,7 @@
 
 /* largest program image a console frame may carry (PROG header + 64 insns) */
 #define UART_FRAME_MAX 520u
+#define UART_FRAME_TIMEOUT 200000u
 
 void uart_init(void);
 int  uart_tx_ready(void);      /* TX buffer empty: putc will not stall */
@@ -29,6 +30,7 @@ unsigned uart_recv(uint8_t *dst, unsigned cap);
  * may arrive slower than one poll. */
 typedef struct {
     unsigned phase, type, len, idx, sum;
+    uint32_t last_tick;
 } uart_frame_rx;
 
 /* The wire rules as one pure byte step (core/frame.c); host tests drive

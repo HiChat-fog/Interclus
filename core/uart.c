@@ -44,12 +44,29 @@ void uart_init(void) {
 }
 
 int uart_tx_ready(void) { return (USART1_STATR & STATR_TXE) != 0; }
+
+/* debugger-side observers: the rx ring feeds uart_getc (the host is the
+ * wire), the tap copies every TX byte into a ring the host drains */
+static void uart_tap(uint8_t c) {
+    if (VUART[0] != VU_MAGIC || !(VUART[3] & 1u)) return;
+    if ((uint32_t)(VUART[4] - VUART[5]) < 1024u) {
+        VU_TX[VUART[4] & 1023u] = c;
+        VUART[4] = VUART[4] + 1u;
+    }
+}
+
 void uart_putc(char c) {
     while (!(USART1_STATR & STATR_TXE)) { }
     USART1_DATAR = (uint8_t)c;
+    uart_tap((uint8_t)c);
 }
 
 int uart_getc(void) {
+    if (VUART[0] == VU_MAGIC && VUART[2] < VUART[1]) {
+        int c = VU_RX[VUART[2] & 1023u];
+        VUART[2] = VUART[2] + 1u;
+        return c;
+    }
     if (!(USART1_STATR & STATR_RXNE)) return -1;
     return (int)(uint8_t)USART1_DATAR;
 }
@@ -76,12 +93,22 @@ void uart_putdec(uint32_t v) {
 #define UART_WINDOW 1000000u
 
 unsigned uart_poll_frame(uint8_t *dst, unsigned cap, uart_frame_rx *st) {
+    if (st->phase != 0u &&
+        (uint32_t)(TIMER_NOW() - st->last_tick) > UART_FRAME_TIMEOUT) {
+        st->phase = 0u;
+        st->idx = 0u;
+        st->len = 0u;
+    }
     for (;;) {
         int c = uart_getc();
         if (c < 0) return 0;
+        st->last_tick = TIMER_NOW();
         {
             unsigned n = uart_frame_step((uint8_t)c, dst, cap, st);
-            if (n) return n;
+            if (n) {
+                st->last_tick = TIMER_NOW();
+                return n;
+            }
         }
     }
 }

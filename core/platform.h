@@ -45,6 +45,8 @@
         cmp[1] = hi; \
     } while (0)
 #define BUDGET_ACK()  do { } while (0)
+#define WDT_ARM()   do { } while (0)
+#define WDT_FEED()  do { } while (0)
 #else
 
 #define MON_TEXT   0x08004000u
@@ -100,6 +102,33 @@
     PFIC_IENR0 = (1u << 12); \
 } while (0)
 #define BUDGET_ACK()  do { STK_SR = 0u; PFIC_IPRR0 = (1u << 12); } while (0)
+
+/* E31 watchdog: IWDG on the 40 kHz LSI, ~3.2 s. Armed only after the
+ * boot gate passes — corrupted flash parks for forensics, while a
+ * runtime fail-stop (heartbeat) stops feeding and the measured boot
+ * takes over. CSR 0x7C0 bit8 freezes the dog while halted by debug. */
+#define IWDG_CTLR (*(volatile uint32_t *)0x40003000u)
+#define IWDG_PSCR (*(volatile uint32_t *)0x40003004u)
+#define IWDG_RLDR (*(volatile uint32_t *)0x40003008u)
+#define WDT_ARM()  do { \
+    __asm__ volatile ("csrs 0x7C0, %0" :: "r" (0x100u)); \
+    IWDG_CTLR = 0x5555u; \
+    IWDG_PSCR = 3u; \
+    IWDG_RLDR = 4000u; \
+    IWDG_CTLR = 0xAAAAu; \
+    IWDG_CTLR = 0xCCCCu; \
+} while (0)
+#define WDT_FEED() do { IWDG_CTLR = 0xAAAAu; } while (0)
+
+/* E32: the debugger as a stand-in wire. Words at VUART: [0]=magic,
+ * [1]=rx_wr [2]=rx_rd [3]=flags (bit0 tx ring tap), [4]=tx_wr [5]=tx_rd;
+ * rx ring 1024 B at +0x20, tx ring 1024 B at +0x420. The host stages
+ * frame bytes then bumps rx_wr; uart_getc drains the rx ring before the
+ * peripheral. */
+#define VUART     ((volatile uint32_t *)0x20001700u)
+#define VU_MAGIC  0x54524156u
+#define VU_RX     ((volatile uint8_t *)(0x20001700u + 0x20u))
+#define VU_TX     ((volatile uint8_t *)(0x20001700u + 0x420u))
 
 #endif
 
@@ -194,12 +223,18 @@
 #define S_FPROG   99u   /* last flash mirror write: 0 ok */
 #define S_PREEMPT 100u  /* compartments killed for overrunning budget */
 #define S_TXABORT 101u  /* telemetry frames abandoned: TX never drained */
+#define S_HALT   102u   /* fail-stop marker, survives the watchdog reset */
+#define S_HALTC  103u   /* last fail-stop cause: phase<<24 | mcause */
+#define S_FUZZA  104u   /* boot fuzz: random images the verifier accepted */
+#define S_FUZZR  105u   /* boot fuzz: rejected (the rest) */
 
 /* channel frame types beyond the loader set (E24/E29) */
 #define FRAME_TELE   0xFu   /* device -> host: fault evidence */
 #define FRAME_REARM  0xEu   /* host -> device: operator re-arms slot k */
 #define FRAME_STATUS 0xDu   /* host -> device: read the STATUS window;
                                device -> host: [window:4][words LE] */
+#define FRAME_UPDATE 0x4u   /* reliable update transaction command */
+#define FRAME_UPDATE_REPLY 0xCu /* ACK/NACK/STAGED/ACCEPT/REJECT */
 #define STATUS_WORDS 96u    /* the guarded STATUS window, words 0..95 */
 
 /* PMP NAPOT encodings, derived from the map */

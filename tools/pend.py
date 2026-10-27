@@ -1,7 +1,10 @@
 """Stage a signed PEND image: header, payload, SHA-256 trailer, magic last.
-The digest must be pinned in modules/trusted_digests.h (E26)."""
+The digest must be pinned in modules/trusted_digests.h (E26). Words are
+written with a verify-fix loop: this link delays or drops single writes,
+and a word landing after the magic makes the gate hash half-written
+bytes."""
 import hashlib, struct
-from inject_swarm import wlink
+from inject_swarm import wlink, read_words
 
 PROG_PEND = 0x20003800
 MAGIC = 0x444E4550
@@ -9,9 +12,17 @@ MAGIC = 0x444E4550
 
 def _write_words(base, data):
     data = data + b"\0" * (-len(data) % 4)
-    for i in range(0, len(data), 4):
-        wlink("write-mem", hex(base + i),
-              hex(struct.unpack_from("<I", data, i)[0]))
+    full = {base + i: struct.unpack_from("<I", data, i)[0]
+            for i in range(0, len(data), 4)}
+    bad = full
+    for _ in range(4):
+        for a, w in bad.items():
+            wlink("write-mem", hex(a), hex(w))
+        cur = read_words(base, len(full))
+        bad = {a: w for a, w in full.items() if cur.get(a) != w}
+        if not bad:
+            return
+    raise RuntimeError(f"stage verify failed at {base:#x}")
 
 
 def _stage(body):

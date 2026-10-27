@@ -15,6 +15,7 @@ $CC -c ../core/uart.c -o uart.o
 $CC -c ../core/frame.c -o frame.o
 $CC -c ../core/flash.c -o flash.o
 $CC -c ../core/sha256.c -o sha256.o
+$CC -c ../core/update.c -o update.o
 $CC -c ../core/compartment.c -o compartment.o
 $CC -c ../modules/examples/native_demo.c -o native_demo.o -DNAT_SRAM_BASE=0x80211000
 $LLD -flavor gnu -T ../modules/native.ld --defsym NAT_TEXT_BASE=0x80210000 \
@@ -61,29 +62,32 @@ riscv64-unknown-elf-objcopy -I binary -O elf32-littleriscv -B riscv \
 $CC -Os -c ../modules/supervisor.c -o main_pmp.o
 python3 ../tools/sign_module.py --emit-header >/dev/null
 $LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_qemu.elf \
-    main_qemu.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o compartment.o native_blob.o
+    main_qemu.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o update.o compartment.o native_blob.o
 $CC -c ../qemu/load_test.c -o load_test.o
 $LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_load.elf \
-    load_test.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o compartment.o native_blob.o
+    load_test.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o update.o compartment.o native_blob.o
 $CC -DPROG_FROM_UART -c ../qemu/load_test.c -o load_urx.o
 $LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_urx.elf \
-    load_urx.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o compartment.o native_blob.o
+    load_urx.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o update.o compartment.o native_blob.o
 $CC -c ../qemu/hot_test.c -o hot_test.o
 $CC -c ../qemu/chan_test.c -o chan_test.o
 $CC -c ../qemu/tele_test.c -o tele_test.o
 $CC -c ../qemu/persist_test.c -o persist_test.o
 $CC -c ../qemu/trust_test.c -o trust_test.o
 $CC -c ../qemu/budget_test.c -o budget_test.o
+$CC -c ../qemu/update_test.c -o update_test.o
 $LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_hot.elf \
-    hot_test.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o compartment.o native_blob.o native_variant_qemu_blob.o native_variant_s1_qemu_blob.o native_trap_s1_qemu_blob.o native_trap_qemu_blob.o
+    hot_test.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o update.o compartment.o native_blob.o native_variant_qemu_blob.o native_variant_s1_qemu_blob.o native_trap_s1_qemu_blob.o native_trap_qemu_blob.o
 $LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_chan.elf \
-    chan_test.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o compartment.o native_blob.o
+    chan_test.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o update.o compartment.o native_blob.o
 $LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_tele.elf \
-    tele_test.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o compartment.o native_blob.o native_variant_qemu_blob.o native_variant_s1_qemu_blob.o native_trap_s1_qemu_blob.o native_trap_qemu_blob.o
+    tele_test.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o update.o compartment.o native_blob.o native_variant_qemu_blob.o native_variant_s1_qemu_blob.o native_trap_s1_qemu_blob.o native_trap_qemu_blob.o
 $LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_persist.elf \
-    persist_test.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o compartment.o native_blob.o native_variant_s1_qemu_blob.o native_trap_s1_qemu_blob.o native_trap_qemu_blob.o
+    persist_test.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o update.o compartment.o native_blob.o native_variant_s1_qemu_blob.o native_trap_s1_qemu_blob.o native_trap_qemu_blob.o
 $LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_trust.elf \
-    trust_test.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o compartment.o native_blob.o native_variant_qemu_blob.o native_trap_qemu_blob.o
+    trust_test.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o update.o compartment.o native_blob.o native_variant_qemu_blob.o native_trap_qemu_blob.o
 $LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_budget.elf \
-    budget_test.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o compartment.o native_blob.o native_spin_s1_qemu_blob.o
-echo "build/fw_qemu.elf build/fw_load.elf build/fw_urx.elf build/fw_hot.elf build/fw_chan.elf build/fw_tele.elf build/fw_persist.elf build/fw_trust.elf build/fw_budget.elf"
+    budget_test.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o update.o compartment.o native_blob.o native_spin_s1_qemu_blob.o
+$LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_update.elf \
+    update_test.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o update.o compartment.o native_blob.o
+echo "build/fw_qemu.elf build/fw_load.elf build/fw_urx.elf build/fw_hot.elf build/fw_chan.elf build/fw_tele.elf build/fw_persist.elf build/fw_trust.elf build/fw_budget.elf build/fw_update.elf"
