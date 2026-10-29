@@ -8,6 +8,7 @@ MEMORY {
 SECTIONS {
   .text 0x80000000 : {
     KEEP(*(.text.startup))
+    pmp_audit.o(.text .text.*)
     main_qemu.o(.text .text.*)
     load_test.o(.text .text.*)
     load_urx.o(.text .text.*)
@@ -26,6 +27,7 @@ SECTIONS {
     sha256.o(.text .text.*)
     main_pmp.o(.text .text.*)
     trap_pmp.o(.text .text.*)
+    pmp_audit.o(.rodata .rodata.*)
     main_qemu.o(.rodata .rodata.*)
     load_test.o(.rodata .rodata.*)
     load_urx.o(.rodata .rodata.*)
@@ -48,6 +50,8 @@ SECTIONS {
   } > RAM
 
   .data : {
+    pmp_audit.o(.data .data.* .sdata .sbss)
+    compartment.o(.data .data.* .sdata .sbss)
     main_qemu.o(.data .data.*)
     load_test.o(.data .data.*)
     load_urx.o(.data .data.*)
@@ -70,6 +74,8 @@ SECTIONS {
   } > RAM
 
   .bss : {
+    pmp_audit.o(.bss .bss.* .sbss .sdata COMMON)
+    compartment.o(.bss .bss.* .sbss .sdata COMMON)
     main_qemu.o(.bss .bss.* COMMON)
     load_test.o(.bss .bss.* COMMON)
     load_urx.o(.bss .bss.* COMMON)

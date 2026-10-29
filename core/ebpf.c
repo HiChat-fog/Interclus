@@ -99,14 +99,18 @@ int ebpf_run(const struct ebpf_prog *p, struct ebpf_result *r) {
 
         if (cls == CLS_ALU64 || cls == CLS_ALU) {
             int is64 = (cls == CLS_ALU64);
-            uint64_t arg;
+            uint64_t arg = 0;
             uint64_t v;
             uint8_t shift;
-            if (in.opcode & SRC_X) arg = regs[in.src];
-            else arg = is64 ? (uint64_t)(int64_t)in.imm
-                            : (uint64_t)(uint32_t)in.imm;
+            /* neg and endian swap never observe the operand: reading it
+             * anyway would widen the read set the verifier models */
+            if (op != ALU_NEG && op != ALU_END) {
+                if (in.opcode & SRC_X) arg = regs[in.src];
+                else arg = is64 ? (uint64_t)(int64_t)in.imm
+                                : (uint64_t)(uint32_t)in.imm;
+            }
             if (in.dst == 10) { r->fault = EBPF_FAULT_FP; goto out; }
-            v = regs[in.dst];
+            v = (op == ALU_MOV) ? 0 : regs[in.dst];
             switch (op) {
             case ALU_ADD: v += arg; break;
             case ALU_SUB: v -= arg; break;
@@ -157,8 +161,8 @@ int ebpf_run(const struct ebpf_prog *p, struct ebpf_result *r) {
             pc++;
         } else if (cls == CLS_JMP || cls == CLS_JMP32) {
             int is32 = (cls == CLS_JMP32);
-            uint64_t arg;
-            uint64_t v;
+            uint64_t arg = 0;
+            uint64_t v = 0;
             int taken;
             if (cls == CLS_JMP && op == JMP_CALL) {
 
@@ -183,9 +187,15 @@ int ebpf_run(const struct ebpf_prog *p, struct ebpf_result *r) {
                 pc++;
                 continue;
             }
-            if (in.opcode & SRC_X) arg = regs[in.src];
-            else arg = is32 ? (uint64_t)(uint32_t)in.imm : (uint64_t)(int64_t)in.imm;
-            v = regs[in.dst];
+            /* ja and exit observe no operand registers: ja is unconditional
+             * and exit returns r0 — keep the read set exactly the table
+             * the verifier models */
+            if (op != JMP_JA && op != JMP_EXIT) {
+                if (in.opcode & SRC_X) arg = regs[in.src];
+                else arg = is32 ? (uint64_t)(uint32_t)in.imm
+                                : (uint64_t)(int64_t)in.imm;
+                v = regs[in.dst];
+            }
             if (is32) {
                 uint32_t a32 = (uint32_t)v, b32 = (uint32_t)arg;
                 switch (op) {

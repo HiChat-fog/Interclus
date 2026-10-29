@@ -24,6 +24,9 @@ static struct compartment comps[COMP_COUNT]
 
 volatile uint32_t cur_tcb;      /* TCB of the running compartment, for ecall */
 volatile uint32_t cur_comp;     /* forensics attribution */
+volatile uint32_t g_cfgw;       /* last cfgw written: QingKe pmpcfg reads
+                                   back noise, so board drills verify the
+                                   armed policy through this mirror */
 
 static void csr_set(unsigned csr, uint32_t v) {
     __asm__ volatile ("csrw %0, %1" :: "n" (csr), "r" (v) : "memory");
@@ -48,6 +51,7 @@ void compartment_arm(unsigned i) {
     csr_set(0x3b2, 0u);
     csr_set(0x3b3, PMP_DENY);
     csr_set(0x3a0, cfgw);
+    g_cfgw = cfgw;
     for (unsigned j = 0; j < COMP_COUNT; j++) comps[j].armed = 0u;
     comps[i].armed = 1u;
 }

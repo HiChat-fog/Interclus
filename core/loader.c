@@ -105,7 +105,8 @@ static uint32_t insn_reads(uint64_t e) {
     if (cls == 0x04u || cls == 0x07u) {           /* ALU32 / ALU64 */
         if (hi == 0xb0u)                          /* MOV: dst overwritten */
             return (op & 0x08u) ? 1u << src : 0u;
-        if (hi == 0xd0u)                          /* endian swap: dst only */
+        if (hi == 0x80u || hi == 0xd0u)           /* neg / endian swap:
+                                                     the arg never lands */
             return 1u << dst;
         return (1u << dst) | ((op & 0x08u) ? 1u << src : 0u);
     }
@@ -244,10 +245,18 @@ ic_status ic_program_check(const uint64_t *ins, uint32_t cnt) {
         int16_t off = (int16_t)((e >> 16) & 0xffffu);
         if (dst > 10u || src > 10u) return IC_ERR_VALIDATE;
         if (!opcode_known(op)) return IC_ERR_VALIDATE;
+        if ((op & 0x07u) == 0x04u || (op & 0x07u) == 0x07u) {
+            if ((op & 0xf0u) == 0xd0u && (op & 0x08u) &&
+                (e >> 32) != 16u && (e >> 32) != 32u && (e >> 32) != 64u)
+                return IC_ERR_VALIDATE;           /* bswap: only 16/32/64
+                                                     have runtime meaning */
+        }
         if ((op & 0x07u) == 0x05u || (op & 0x07u) == 0x06u) {
             uint8_t hi = op & 0xf0u;
             if (hi == 0x90u) continue;              /* exit */
-            if (hi == 0x80u) {                      /* call: helpers 1 and 2 */
+            if (hi == 0x80u) {                      /* call: helpers 1 and 2,
+                                                       JMP64 class only */
+                if ((op & 0x07u) == 0x06u) return IC_ERR_VALIDATE;
                 if (op & 0x08u) return IC_ERR_VALIDATE;
                 {
                     uint32_t h = (uint32_t)((e >> 32) & 0xffffffffu);

@@ -7,6 +7,13 @@ CC="clang --target=riscv32 -march=rv32imafc -mabi=ilp32 -mno-relax -msmall-data-
 LLD="${LLD:-$HOME/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld}"
 # 对象文件须以 monitor.o / attacker.o 基名参与链接（链接脚本按文件名分配舱室段）
 $CC -c ../startup.S -o startup.o
+$CC -c ../qemu/pmp_audit.c -o pmp_audit_b.o
+$CC -c ../core/compartment.c -o compartment_b.o
+$CC -c ../core/uart.c -o uart_b.o
+$CC -c ../core/frame.c -o frame_b.o
+$LLD -flavor gnu -T ../modules/pmpab.ld -nostdlib -o fw_pmpab.elf \
+    startup.o pmp_audit_b.o compartment_b.o uart_b.o frame_b.o
+riscv64-unknown-elf-objcopy -O binary --only-section=.init --only-section=.text --only-section=.rodata fw_pmpab.elf fw_pmpab.bin
 $CC -c ../core/trap.S -o trap_pmp.o
 $CC -Oz -c ../core/loader.c -o loader.o
 $CC -Os -c ../core/uart.c -o uart.o
