@@ -3,7 +3,7 @@ Frames go in through the VUART rx ring, prints and replies come back
 through the tx tap. Beats mirror chan_qemu: a runtime data commit, a
 signed program install, a corrupt frame (dropped), an unpinned digest
 (rejected by the trust gate), an operator re-arm, and a status window
-query whose 96-word reply is decoded from the tap — no PA9/PA10 needed.
+query whose 106-word reply is decoded from the tap — no PA9/PA10 needed.
 
   cd tools && python3 chan_board.py
 """
@@ -31,7 +31,7 @@ def st_word(i):
 def fresh_boot(timeout=12):
     wr32(VU, 0)                      # no stale virtual wire at boot
     wlink("write-mem", hex(PROG_PEND), "0x0")
-    wlink("write-mem", hex(PROG_PEND + 0x208), "0x0")
+    wlink("write-mem", hex(PROG_PEND + 0x240), "0x0")
     wr32(BASE + 4 * S_DONE, 0xFFFFFFFF)
     wr32(BASE + 4 * S_HLOAD, 0xFFFFFFFF)
     wlink("reset")
@@ -163,11 +163,11 @@ def main():
     if replies:
         p = replies[-1]
         words = [struct.unpack_from("<I", p, 4 + 4 * k)[0]
-                 for k in range(min(96, (len(p) - 4) // 4))]
-    ref = [st_word(k) for k in range(96)]
-    same = len(words) == 96 and all(
-        words[k] == ref[k] for k in range(96) if k != 3)
-    if len(words) == 96:
+                 for k in range(min(106, (len(p) - 4) // 4))]
+    ref = [st_word(k) for k in range(106)]
+    same = len(words) == 106 and all(
+        words[k] == ref[k] for k in range(106) if k != 3)
+    if len(words) == 106:
         print(f"6 status window: n={len(words)} w0={words[0]:#x} "
               f"w1={words[1]:#x} w88={words[88]:#x} match={same}")
     else:

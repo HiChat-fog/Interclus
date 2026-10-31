@@ -173,7 +173,11 @@
  * both capped by the payload window. */
 #define PROG_PEND_ADDR  (PROG_AREA + 0x800u)
 #define PROG_PEND_MAGIC 0x444E4550u   /* "PEND" */
-#define PROG_PEND_OK    ((volatile uint32_t *)(PROG_PEND_ADDR + 0x208u))
+#define PROG_PEND_MAGIC_OFF 0x240u
+/* the magic sits beyond the largest staged body (8 + 512 + 32 = 552):
+ * at +0x208 it once overlapped the trust digest of a full-length
+ * program, making 61..64-insn images silently uninstallable */
+#define PROG_PEND_OK    ((volatile uint32_t *)(PROG_PEND_ADDR + PROG_PEND_MAGIC_OFF))
 #define PEND_EBPF       1u
 #define PEND_NATIVE     2u
 
@@ -235,7 +239,9 @@
                                device -> host: [window:4][words LE] */
 #define FRAME_UPDATE 0x4u   /* reliable update transaction command */
 #define FRAME_UPDATE_REPLY 0xCu /* ACK/NACK/STAGED/ACCEPT/REJECT */
-#define STATUS_WORDS 96u    /* the guarded STATUS window, words 0..95 */
+#define STATUS_WORDS 106u    /* the guarded STATUS window, words 0..105: S_FUZZR is the
+                           highest named field, and the wire telemetry
+                           walks exactly this many words */
 
 /* PMP NAPOT encodings, derived from the map */
 #define NAPOT(base, size) (((base) >> 2) | ((size) >> 3) - 1u)

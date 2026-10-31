@@ -197,6 +197,10 @@ static void uart_load(void) {
 }
 
 void boot_main(void) {
+    {   /* the STATUS window is raw SRAM: boot owns it, so every field
+         * starts the session at zero — no retained junk reads as live */
+        for (unsigned i = 0; i < STATUS_WORDS; i++) STATUS[i] = 0u;
+    }
     uint32_t gate = boot_gate();
     if (gate) {
         STATUS[S_GATE] = 0xC0DE0000u | gate;
@@ -424,6 +428,7 @@ void supervisor_reset(void) {
  * by tools/sign_module.py over the exact staged bytes. A digest not on
  * this list is a module this firmware has never seen — rejected. */
 #include "trusted_digests.h"
+#include "../core/layout_asserts.h"
 #define TRUSTED_N (sizeof(g_trusted) / sizeof(g_trusted[0]))
 
 /* E26 gate: the staged image is [header..payload][32-byte digest].
@@ -465,7 +470,7 @@ void hot_swap(void) {
         } else {
             goto rej;
         }
-        if (body > 0x200u - SHA256_LEN || body < 16u) goto rej;
+        if (body > PROG_PEND_MAGIC_OFF - 8u - SHA256_LEN || body < 16u) goto rej;
         if (!trust_check((const uint8_t *)PROG_PEND_ADDR, body,
                          (const uint8_t *)PROG_PEND_ADDR + body)) goto rej;
     }

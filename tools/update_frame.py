@@ -50,7 +50,7 @@ def pass_all_image(pass_all):
 
 def iter_chunks(tid, image, size=64):
     """Yield bounded chunks and enforce the wire's stop-and-wait shape."""
-    if not image or len(image) > 480 or not 1 <= size <= 64:
+    if not image or len(image) > 552 or not 1 <= size <= 64:
         raise ValueError("image/chunk size outside update limits")
     yield from chunks(tid, image, size)
 

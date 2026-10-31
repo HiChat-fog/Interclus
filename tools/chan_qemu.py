@@ -92,7 +92,7 @@ def main():
                 body = buf[i + 2:i + 5 + ln]
                 if ((sum(body) + buf[i + 5 + ln]) & 0xFF) == 0 and \
                         body[0] == 0x0D:
-                    n = min(96, (ln - 4) // 4)
+                    n = min(106, (ln - 4) // 4)
                     status_seen[0] = [struct.unpack_from(
                         "<I", body, 7 + 4 * k)[0] for k in range(n)]
                     del buf[:i + 5 + ln + 1]

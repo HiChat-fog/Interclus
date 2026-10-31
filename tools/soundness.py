@@ -192,6 +192,8 @@ def ic_program_check(ins):
             off -= 0x10000
         if dst > 10 or src > 10:
             return VALIDATE
+        if (op & 7) == 1 and dst == 10:
+            return VALIDATE
         if not opcode_known(op):
             return VALIDATE
         cls = op & 7

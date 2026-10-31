@@ -244,6 +244,10 @@ ic_status ic_program_check(const uint64_t *ins, uint32_t cnt) {
         uint8_t src = (uint8_t)((e >> 12) & 0x0fu);
         int16_t off = (int16_t)((e >> 16) & 0xffffu);
         if (dst > 10u || src > 10u) return IC_ERR_VALIDATE;
+        if ((op & 0x07u) == 0x01u && dst == 10u)
+            return IC_ERR_VALIDATE;       /* LDX into fp: the interpreter
+                                             faults it as OPCODE — the
+                                             verifier owns that promise */
         if (!opcode_known(op)) return IC_ERR_VALIDATE;
         if ((op & 0x07u) == 0x04u || (op & 0x07u) == 0x07u) {
             if ((op & 0xf0u) == 0xd0u && (op & 0x08u) &&

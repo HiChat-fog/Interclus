@@ -44,7 +44,7 @@ static void stage_pass_all(volatile uint8_t *digest_override) {
                                                    + 8u + pass_all_cnt * 8u);
         d[0] ^= 0xFF;                    /* tamper: first digest byte */
     }
-    a[0x208u / 4u] = PROG_PEND_MAGIC;    /* lands last */
+    a[PROG_PEND_MAGIC_OFF / 4u] = PROG_PEND_MAGIC;    /* lands last */
 }
 
 void sweep_next(void) {

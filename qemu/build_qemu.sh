@@ -94,6 +94,23 @@ $CC -c ../qemu/pmp_audit.c -o pmp_audit.o
 $CC -c ../core/compartment.c -o compartment_a.o
 $CC -c ../core/uart.c -o uart_a.o
 $CC -c ../core/frame.c -o frame_a.o
+$CC -c ../qemu/mirror_test.c -o mirror_test.o
+$LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_mirror.elf \
+    mirror_test.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o update.o compartment.o native_blob.o native_variant_qemu_blob.o
+$CC -c ../qemu/tamper_test.c -o tamper_test.o
+$LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_tamper.elf \
+    tamper_test.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o update.o compartment.o native_blob.o
+$CC -c ../qemu/rollback_test.c -o rollback_test.o
+$LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_roll.elf \
+    rollback_test.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o update.o compartment.o native_blob.o
+riscv64-unknown-elf-objcopy -I binary -O elf32-littleriscv -B riscv \
+    --rename-section .data=.native_blob,alloc,load,readonly,contents \
+    --redefine-sym _binary_canary_qemu_bin_start=_binary_native_demo_bin_start \
+    --redefine-sym _binary_canary_qemu_bin_end=_binary_native_demo_bin_end \
+    --redefine-sym _binary_canary_qemu_bin_size=_binary_native_demo_bin_size \
+    canary_qemu.bin canary_blob_q.o
+$LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_e37.elf \
+    main_qemu.o report.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o update.o compartment.o canary_blob_q.o
 $LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_pmpa.elf \
     pmp_audit.o compartment_a.o uart_a.o frame_a.o
-echo "build/fw_pmpa.elf build/fw_qemu.elf build/fw_load.elf build/fw_urx.elf build/fw_hot.elf build/fw_chan.elf build/fw_tele.elf build/fw_persist.elf build/fw_trust.elf build/fw_budget.elf build/fw_update.elf"
+echo "build/fw_pmpa.elf build/fw_e37.elf build/fw_roll.elf build/fw_tamper.elf build/fw_mirror.elf build/fw_qemu.elf build/fw_load.elf build/fw_urx.elf build/fw_hot.elf build/fw_chan.elf build/fw_tele.elf build/fw_persist.elf build/fw_trust.elf build/fw_budget.elf build/fw_update.elf"

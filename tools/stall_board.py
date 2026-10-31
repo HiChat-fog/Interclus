@@ -36,7 +36,7 @@ def wait_for(pred, timeout):
 
 def fresh_boot(timeout=12):
     wlink("write-mem", hex(PROG_PEND), "0x0")
-    wlink("write-mem", hex(PROG_PEND + 0x208), "0x0")
+    wlink("write-mem", hex(PROG_PEND + 0x240), "0x0")
     wlink("write-mem", hex(BASE + 4 * S_DONE), "0xFFFFFFFF")
     wlink("write-mem", hex(BASE + 4 * S_HLOAD), "0xFFFFFFFF")
     wlink("reset")

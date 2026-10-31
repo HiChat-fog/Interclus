@@ -23,6 +23,14 @@ PASS_ALL = [
     enc(0x95, 0, 0, 0, 0),
 ]
 
+# the E44 capacity proof's full-length program: r0=1, 62 fillers, exit —
+# the longest body the PEND window must carry without touching the magic
+MAX_PROG = (
+    [enc(0xB7, 0, 0, 0, 1)]
+    + [enc(0xB7, 2, 0, 0, i) for i in range(62)]
+    + [enc(0x95, 0, 0, 0, 0)]
+)
+
 def pend_image(kind, w0, entry, slot, payload):
     if kind == 1:
         return struct.pack("<II", w0, kind) + payload
@@ -65,6 +73,12 @@ def main():
         except FileNotFoundError:
             continue
         imgs.append((name, pend_image(2, len(spin), 0, 1, spin)))
+    try:
+        canary = _bin("canary.bin")
+        imgs.append(("canary (board, slot0)", pend_image(
+            2, len(canary), 0, 0, canary)))
+    except FileNotFoundError:
+        pass
     for name, fname, slot in (
             ("native_chaos_s1 (board, slot1)", "native_chaos_s1.bin", 1),
             ("native_variant_s1 (board, slot1)", "native_variant_s1.bin", 1),
@@ -89,6 +103,9 @@ def main():
     imgs.append(("slowspin (legal, budget-killer)", pend_image(
         1, len(slow), 0, 0,
         b"".join(struct.pack("<Q", e) for e in slow))))
+    imgs.append(("max_insns (qemu, 64-insn capacity proof)", pend_image(
+        1, len(MAX_PROG), 0, 0,
+        b"".join(struct.pack("<Q", e) for e in MAX_PROG))))
     if "--pass-all" in sys.argv:
         d = digest(imgs[0][1])
         print(d.hex())

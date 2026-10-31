@@ -26,9 +26,9 @@ def _write_words(base, data):
 
 
 def _stage(body):
-    wlink("write-mem", hex(PROG_PEND + 0x208), "0x0")
+    wlink("write-mem", hex(PROG_PEND + 0x240), "0x0")
     _write_words(PROG_PEND, body + hashlib.sha256(body).digest())
-    wlink("write-mem", hex(PROG_PEND + 0x208), hex(MAGIC))
+    wlink("write-mem", hex(PROG_PEND + 0x240), hex(MAGIC))
 
 
 def stage_ebpf(insns):

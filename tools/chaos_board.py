@@ -27,7 +27,7 @@ def st_word(i):
 def fresh_boot(timeout=12):
     wr32(0x20001000, 0)
     wlink("write-mem", hex(PROG_PEND), "0x0")
-    wlink("write-mem", hex(PROG_PEND + 0x208), "0x0")
+    wlink("write-mem", hex(PROG_PEND + 0x240), "0x0")
     wr32(BASE + 4 * S_DONE, 0xFFFFFFFF)
     wr32(BASE + 4 * S_HLOAD, 0xFFFFFFFF)
     wlink("reset")

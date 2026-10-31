@@ -45,6 +45,10 @@ $LLD -flavor gnu -T ../modules/native.ld --defsym NAT_TEXT_BASE=0x2000C000 \
     -nostdlib -o native_trap_s1.elf native_trap_s1.o
 riscv64-unknown-elf-objcopy -O binary --only-section=.text native_trap_s1.elf native_trap_s1.bin
 $CC -c ../modules/examples/native_spin.c -o native_spin_s1.o -DNAT_SRAM_BASE=0x2000D000
+$CC -c ../modules/examples/canary_mod.c -o canary_mod.o -DNAT_SRAM_BASE=0x2000B000
+$LLD -flavor gnu -T ../modules/native.ld --defsym NAT_TEXT_BASE=0x2000A000 \
+    -nostdlib -o canary.elf canary_mod.o
+riscv64-unknown-elf-objcopy -O binary --only-section=.text canary.elf canary.bin
 $CC -c ../modules/examples/native_chaos.c -o native_chaos_s1.o -DNAT_SRAM_BASE=0x2000D000
 $LLD -flavor gnu -T ../modules/native.ld --defsym NAT_TEXT_BASE=0x2000C000 \
     -nostdlib -o native_chaos_s1.elf native_chaos_s1.o

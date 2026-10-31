@@ -19,6 +19,12 @@ struct compartment {
     uint32_t tcb[32];
 };
 
+/* the drills and the trap path hand-compute these offsets; a field move
+ * must break the build, not the evidence */
+_Static_assert(sizeof(struct compartment) == 156u, "compartment layout drifted");
+_Static_assert(sizeof(struct compartment) == sizeof(ic_compartment_spec)
+               + 3u * 4u + 32u * 4u, "tcb sits at word 7");
+
 static struct compartment comps[COMP_COUNT]
     __attribute__((section(".comp_state"), aligned(8), used));
 

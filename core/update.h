@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define UPDATE_MAX_IMAGE 480u
+#define UPDATE_MAX_IMAGE 552u   /* 8 + 64*8 + 32: the full staged body */
 #define UPDATE_MAX_CHUNK 64u
 #define UPDATE_FRAME_TIMEOUT 200000u
 #define UPDATE_FRAME 0x4u

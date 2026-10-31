@@ -38,7 +38,7 @@ static void stage_native(uint32_t addr, const uint8_t *code, uint32_t len,
     a[3] = slot;
     for (uint32_t i = 0; i < len; i++) p[i] = code[i];
     trust_stamp((volatile uint8_t *)addr, 16u + len);
-    a[0x208u / 4u] = PROG_PEND_MAGIC;
+    a[PROG_PEND_MAGIC_OFF / 4u] = PROG_PEND_MAGIC;
 }
 
 static int verdicts_ok(void) {

@@ -43,7 +43,7 @@ class Client:
 
     def transfer(self, tid, image):
         self.tid = tid
-        if not image or len(image) > 480:
+        if not image or len(image) > 552:
             raise UpdateError("image size")
         self._exchange(begin(tid, image),
                        lambda c, s, d: c in (0x80, 0x82, 0x83, 0x84))

@@ -135,9 +135,12 @@ int main(void) {
     n = make(p, UPDATE_OP_BEGIN, id, 0, 40, digest, 0);
     check("too small rejected", !update_process(&rx, p, n, stage, &magic, &r) &&
           r.detail == UPDATE_ERR_FORMAT);
-    n = make(p, UPDATE_OP_BEGIN, id, 0, 481, digest, 0);
+    n = make(p, UPDATE_OP_BEGIN, id, 0, 553, digest, 0);
     check("too large rejected", !update_process(&rx, p, n, stage, &magic, &r) &&
           r.detail == UPDATE_ERR_FORMAT && magic == 0);
+    n = make(p, UPDATE_OP_BEGIN, id, 0, 552, digest, 0);
+    check("max image accepted", update_process(&rx, p, n, stage, &magic, &r) &&
+          magic == 0);
 
     puts(fails ? "UPDATE FAIL" : "UPDATE PASS");
     return fails != 0;

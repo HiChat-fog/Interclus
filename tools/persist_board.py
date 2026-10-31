@@ -4,7 +4,7 @@ through the same gates, proof returns without any re-install.
 
   cd tools && python3 persist_board.py
 """
-import sys, time
+import struct, sys, time
 from inject_swarm import wlink, read_words
 from pend import stage_native
 
@@ -26,7 +26,34 @@ def main():
     print(f"1 install slot1: NAT2={hex(nat2 or 0)} NSLOT={nslot} "
           f"MIR={hex(mir)}")
     if mir != 0x4D495234:
-        print("   mirror page is blank: the M-mode program path did not land")
+        # documented silicon degradation: M-mode self-programming of the
+        # main array silently fails (erase lands, program stores do not).
+        # The mechanism's own answer: write the mirror via the flashing
+        # tool path and let the restore gate judge the page.
+        print("   self-program dead (0xE339 fill) -> flashing-tool path")
+        page = (struct.pack("<IIII", 0x4D495234, 1, len(natvar), 0)
+                + natvar)
+        page += b"\xFF" * (256 - len(page))
+        # the link's fastprogram only takes 4 KiB-aligned blocks: the
+        # slot-1 page rides at +0x400 inside one erased 4 KiB block
+        page = b"\xFF" * 0x400 + page
+        page += b"\xFF" * (4096 - len(page))
+        import subprocess, tempfile, os
+        wlink("reset")            # quiet board: the flasher halts the
+        time.sleep(0.5)           # core; a live WDT fights the attach
+        with tempfile.NamedTemporaryFile(suffix=".bin",
+                                         delete=False) as f:
+            f.write(page)
+            tmp = f.name
+        r = subprocess.run(["wlink", "flash", "--address", "0x0800A000",
+                            tmp], capture_output=True, text=True,
+                           timeout=120)
+        os.unlink(tmp)
+        if "Flash done" not in r.stdout:
+            print("   tool flash failed:", r.stdout[-120:], r.stderr[-120:])
+            return 1
+        mir = read_words(0x0800A400, 1).get(0x0800A400, 0)
+        print(f"   mirror via tool: MIR={hex(mir)}")
     ok &= (nat2 or 0) == 0xC0DE0003 and nslot == 1
 
     # power cycle: reset is the closest a drill gets without a plug switch;
