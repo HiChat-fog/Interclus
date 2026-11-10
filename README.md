@@ -7,171 +7,135 @@ English | [简体中文](README.zh-CN.md)
 
 > *An eBPF interpreter enclosed by RISC-V PMP.*
 
-![architecture](docs/architecture.png)
-
-its time to change readme.....
-
 An eBPF interpreter running unprivileged inside RISC-V PMP compartments on a
-CH32V307 (RV32IMAFC, no MMU). A machine-mode supervisor arms the boundaries,
-schedules the compartments, and closes a capture-forensics-eviction loop:
-a compartment's first faulting access is logged with `mcause` and `mtval`,
-its register frame is parked in its TCB as evidence, and the compartment is
-evicted — the schedule continues without it (Tock-style, no collateral).
+CH32V307 (RV32IMAFC, no MMU). A machine-mode supervisor arms boundaries,
+schedules compartments, and turns a compartment's first illegal access into
+evidence: `mcause` and `mtval` into the forensics ring, the register frame
+into the TCB, then eviction. The schedule continues without it.
+
+Compartments are table-driven. Each owns a virtual region table (VRT); the
+four PMP entries are its cache. Two rows stay pinned (sram, text), one slot
+swaps in any other covered row on first fault and retries the instruction, one
+no-permission entry denies the rest. Faults outside the table or without the
+right permission keep the evidence path.
 
 ## Quick start (no hardware)
-
-The full capacity sweep runs under QEMU:
 
 ```bash
 bash qemu/build_qemu.sh
 qemu-system-riscv32 -M virt -bios none -kernel build/fw_qemu.elf -nographic
 ```
 
-Eight swarm sizes (N=8..64) go through the same four-phase schedule as the
-board: eBPF filtering, grid screening, a native-C reference filter, and the
-five-step attack spectrum. Each pass prints its evidence:
+Eight swarm sizes (N=8..64) run the board's four-phase schedule: eBPF
+filtering, grid screening, a native-C reference filter, the attack spectrum.
 
 ```text
 verdicts: 1 1 0 2 3 4
-insns:    15 12 5 12 13 15
 alerts:  board=4 mirror=4
 attack:  n=5 mtval: 0x80200200 0x80200080 0x80200200 0x80100000 0x80100000
-integrity: verdicts=1 checksum=1 own=1 native=1 proof=1 sv=1
-== MATCH ==
-
-...
-
+integrity: verdicts=1 checksum=1 own=1 native=1 proof=1 sv=1 nat2=1 swaps=1
 == SWEEP 8/8 MATCH ==
 ```
 
-The alert counts across the sweep are 0, 0, 3, 4, 10, 15, 19, 26, and the
-board reproduces them exactly.
+Alert counts across the sweep are 0, 0, 3, 4, 10, 15, 19, 26; the board
+reproduces them. `swaps=1` is the map row filling once during screening.
 
-## What you can learn here
+## Compartment engine
 
-| Topic | What it shows |
+| Entry | Role |
 | --- | --- |
-| PMP on a real MCU | NAPOT regions, a deny-all filler entry, measured vendor quirks: four usable entries, unmatched-allow, misaligned `mtvec` breaks trap delivery |
-| 64-bit eBPF on a 32-bit core | a subset interpreter in portable C99, bit-exact on x86-64 and RV32 |
-| Adversarial probe | attacks the isolation, including a forged-stack-pointer try at the trap handler, gets caught, forensics precise to the address |
-| One firmware, two targets | real silicon and QEMU from one source, via `core/platform.h` |
-| Boot-time loading | external bytecode passes the gates, replaces the compiled-in policy |
+| 0 | pinned sram row, R/W |
+| 1 | pinned text row, R/X |
+| 2 | swap-in slot, one NAPOT write per fill |
+| 3 | no-permission filler, always armed |
+
+Arming writes the two pinned rows and a cfg word assembled at mount. The trap
+entry classifies a load, store or fetch fault: a VRT hit with the operation
+granted programs `pmpaddr2`, fences, writes `pmpcfg0` with the pinned bytes,
+fences, returns to the same `mepc`. Everything else goes to the evidence path.
+Native slots are separate domains.
+
+The eBPF map sits outside the monitor box on its own VRT row; the verifier
+takes helper permissions from it (helper 1: R, helper 2: W) and the boot gate
+rejects a policy that disagrees.
+
+| Path | QEMU instructions | CH32V307 STK ticks |
+| --- | --- | --- |
+| arm a compartment | 26 | 5-6 |
+| swap-in, load | 88 | 45 |
+| swap-in, store | 91 | 45-46 |
+| swap-in, fetch | 103 | 48-49 |
+
+One tick is 8 HCLK cycles; the swap-in rows are end to end.
 
 ## Layout
 
 ```text
-core/                 contract.h, eBPF interpreter, helpers, trap capture, platform map
-modules/              supervisor, monitor, attacker probe, policies
-descriptions/         YAML compartment descriptions, generated C
-qemu/                 QEMU target: boot, fixture mailboxes, evidence report
-tests/                host tests
-tools/                swarm injection, program loader, host mirror check
-docs/                 architecture figure
-reference/            firmware image used for recorded results
-build.sh              board firmware
-qemu/build_qemu.sh    QEMU firmware
+core/          contract, eBPF interpreter, helpers, trap capture, platform map
+core/pmp/      virtual region table, swap-in engine, V4F port
+modules/       supervisor, monitor, attacker, policies
+qemu/          QEMU target, evidence report, swap-in drill
+tests/         host tests: interpreter, engine, verifier
+tools/         swarm injection, program loader, board audits
+docs/          architecture figure
+reference/     firmware image for recorded results
 ```
 
 ## Verification
 
-Three gates guard one codebase: the interpreter, the supervisor, and the
-monitor are the same C99 sources everywhere.
-
-| Gate | Where | What it proves |
+| Gate | Where | Covers |
 | --- | --- | --- |
-| host tests | 66 cases on x86-64 | verdicts and instruction counts are bit-exact |
-| QEMU pipeline | full four-phase schedule, green in CI | every recorded experiment reproduces without hardware |
-| board | CH32V307 + WCH-LinkE | the recorded numbers come from real silicon |
-
-### Host tests
+| host | 91 checks on x86-64 | verdicts and instruction counts bit-exact, engine invariants, region gate |
+| QEMU | full schedule, CI | sweep, load, hot swap, channel, telemetry, persistence, trust, budget, swap-in drill |
+| board | CH32V307 + WCH-LinkE | the recorded numbers from silicon |
 
 ```bash
-gcc -fsanitize=address,undefined -ffreestanding -o t tests/test_host.c core/ebpf.c core/helpers.c
-./t
+gcc -O2 -ffreestanding -o t tests/test_host.c core/ebpf.c core/helpers.c core/frame.c && ./t
+gcc -O2 -ffreestanding -o p tests/test_pmp.c core/pmp/icp.c && ./p
+gcc -O2 -ffreestanding -o v tests/test_verifier.c core/loader.c && ./v
+qemu-system-riscv32 -M virt -bios none -kernel build/fw_fill.elf -nographic
 ```
+
+The swap-in drill covers three operations with a timing bill, a 200-swap thrash
+between two overflow rows, and the violation cases.
 
 ### On the board
 
-Hardware: CH32V307VCT6 board + WCH-LinkE debugger.
-
 ```bash
-./build.sh                            # -> build/fw_pmp.bin
+./build.sh
 wlink flash -e build/fw_pmp.bin
-python3 tools/inject_swarm.py 32 --seed 7
+python3 tools/inject_swarm.py 32 --seed 7    # host alerts=4  board alerts=4
+python3 tools/pmpa_board.py                  # PMP containment sweep
 ```
 
-```text
-swarm N=32 (seed=7)  host alerts=4  board alerts=4
-RESULT: MATCH ✅
-```
+### Load and channel
 
-Sizes from 8 to 64 (the full mailbox capacity) and other seeds all work.
-
-### Load a program at boot
-
-At boot the supervisor checks a program area for a `PROG` header followed by
-raw bytecode. The bytes pass the descriptor gate and a static preflight
-before they land in the monitor's slot; anything rejected falls back to the
-built-in policy, with the reason recorded in STATUS.
+A `PROG` image, a console frame, or a runtime frame all pass the same gates.
+`build/pmp_probe.bin` dumps CSR read-backs and a fault log to SRAM; its last
+stage hangs by design, reflash `build/fw_pmp.bin` afterwards.
 
 ```bash
-python3 tools/load_prog.py          # board, WCH-LinkE attached: verdicts flip
-python3 tools/load_prog.py --bad    # oversized count: fallback, reason code
-qemu-system-riscv32 -M virt -bios none -kernel build/fw_load.elf -nographic
+python3 tools/load_prog.py
+python3 tools/uart_frame.py | qemu-system-riscv32 -M virt -bios none -kernel build/fw_urx.elf -display none -serial stdio -monitor none
+python3 tools/chan_qemu.py
+python3 tools/uart_data.py 24
 ```
-
-The QEMU variant runs the same load path end to end and prints
-`== LOAD PASS ==`.
-
-The same load also works over the console: a frame (sync, type, length,
-payload, checksum) pushed during the boot window lands in the program
-area and faces the same gates. A corrupted frame is dropped before the
-gates ever see it.
-
-    python3 tools/uart_frame.py | qemu-system-riscv32 -M virt -bios none -kernel build/fw_urx.elf -display none -serial stdio -monitor none
-
-### Runtime channel
-
-After boot the console stays live. The service loop polls frames between
-rounds — no debugger needed: a type-2 frame commits a new swarm to the
-mailbox and the schedule re-runs against it; a type-1 frame installs a
-program through the hot-swap gates; type 3 stages a native module. Frames
-carry a checksum, so wire noise is dropped before anything commits, and a
-corrupted byte stream resyncs on the next frame. USART1 has no FIFO, so
-the poll loop runs tight; a frame lost mid-round is resent by the tool.
-
-```bash
-python3 tools/chan_qemu.py            # QEMU: five frames, == CHAN PASS ==
-python3 tools/uart_data.py 24         # board: live swarm over the wire
-```
-
-## PMP semantics probe
-
-A dedicated probe firmware measures the core's PMP behavior and dumps raw
-evidence to SRAM:
-
-```bash
-wlink flash -e build/pmp_probe.bin
-wlink dump 0x20000100 400     # CSR read-backs, fault log, U-mode markers
-```
-
-The last stage ends hung by design (misaligned-`mtvec` trap test); reflash
-`build/fw_pmp.bin` afterwards.
 
 ## Roadmap
 
-- [x] Runtime channel: data, eBPF, and native module frames over the console
-- [x] Native module loading: time-multiplexed PMP compartments
-- [ ] Support for other PMP-capable RISC-V MCUs
+- [x] Runtime channel: data, eBPF, native module frames
+- [x] Compartments: time-multiplexed PMP boxes
+- [x] VRT engine: pinned rows, one swap-in slot, fault-time fill
+- [x] Region-aware verifier and map row
+- [ ] Other PMP-capable RISC-V MCUs
 
 ## Toolchain
 
 | Use | Needs |
 | --- | --- |
-| host tests | gcc (or clang) |
-| board firmware | clang with riscv32 target, `lld` or rust-lld, `riscv64-unknown-elf-objcopy`, `wlink` |
-| QEMU firmware | clang with riscv32 target, `lld` or rust-lld, `qemu-system-riscv32` |
-| injection / loader tools | python3 |
+| host tests | gcc or clang |
+| board | clang riscv32, lld, `riscv64-unknown-elf-objcopy`, `wlink` |
+| QEMU | clang riscv32, lld, `qemu-system-riscv32` |
 
 ## License
 
