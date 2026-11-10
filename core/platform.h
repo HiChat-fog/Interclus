@@ -147,9 +147,19 @@
 #define MON_NATIVE_VERD    ((volatile uint32_t *)(MON_BOX + 0x680u))
 #define DIAG_RUNS    ((volatile uint32_t *)(MON_BOX + 0x700u))
 #define DIAG_ALRT    ((volatile uint32_t *)(MON_BOX + 0x704u))
-#define MON_MAP      ((volatile uint32_t *)(MON_BOX + 0x800u))
+/* the eBPF grid map lives outside the monitor box: one VRT row of its
+ * own, mounted as the monitor domain's overflow row; the first helper
+ * access swaps it into the PMP window through the fill path */
+#ifdef QEMU_TARGET
+#define MAP_BOX     0x80216000u
+#else
+#define MAP_BOX     0x20006000u
+#endif
+#define MON_MAP      ((volatile uint32_t *)MAP_BOX)
 #define MON_DATA    ((volatile uint8_t *)(MON_BOX + 0xA00u))
 #define MAP_CELLS    64u
+#define IC_MAP_REGION() \
+    (&(const ic_region){ MAP_BOX, MAP_CELLS, IC_REGION_R | IC_REGION_W })
 
 /* loaded-program slot in monitor SRAM: count word, then up to 64 insns;
  * 0x1800 < MON_STACK (0x1F00) so the slot never meets the stack */

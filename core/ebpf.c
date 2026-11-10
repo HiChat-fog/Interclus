@@ -166,19 +166,26 @@ int ebpf_run(const struct ebpf_prog *p, struct ebpf_result *r) {
             int taken;
             if (cls == CLS_JMP && op == JMP_CALL) {
 
-                /* map_cells must be a power of two: the mask indexing below
-                 * stays in bounds either way, but only a power of two gives
-                 * uniform coverage of the declared cells */
-                if (p->map == 0 || p->map_cells == 0 ||
-                    (p->map_cells & (p->map_cells - 1u)) != 0) {
+                /* the bound comes from the region when one is attached;
+                 * the mask must stay a power of two so indexing covers
+                 * the declared cells uniformly */
+                uint32_t cells = p->region ? p->region->cells : p->map_cells;
+                if (p->map == 0 || cells == 0 ||
+                    (cells & (cells - 1u)) != 0) {
                     r->fault = EBPF_FAULT_CALL; goto out;
                 }
                 switch (in.imm) {
                 case 1:
-                    regs[0] = p->map[(uint32_t)regs[1] & (p->map_cells - 1u)];
+                    if (p->region && !(p->region->perms & IC_REGION_R)) {
+                        r->fault = EBPF_FAULT_CALL; goto out;
+                    }
+                    regs[0] = p->map[(uint32_t)regs[1] & (cells - 1u)];
                     break;
                 case 2:
-                    p->map[(uint32_t)regs[1] & (p->map_cells - 1u)] = (uint32_t)regs[2];
+                    if (p->region && !(p->region->perms & IC_REGION_W)) {
+                        r->fault = EBPF_FAULT_CALL; goto out;
+                    }
+                    p->map[(uint32_t)regs[1] & (cells - 1u)] = (uint32_t)regs[2];
                     regs[0] = 0;
                     break;
                 default:

@@ -26,6 +26,12 @@ SECTIONS {
     KEEP(*(.comp_state))
     . = ALIGN(4);
   }
+  .pmp_state 0x20000400 (NOLOAD) : {
+    __pmp_start = .;
+    KEEP(*(.pmp_state))
+    . = ALIGN(4);
+    __pmp_end = .;
+  }
   __comp_start = 0;
   __comp_end = 0;
   _stack_top = 0x20003000;

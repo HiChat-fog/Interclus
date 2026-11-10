@@ -73,6 +73,20 @@ ic_status ic_compartment_enter(ic_compartment c, uint32_t entry_offset);
 
 /* ---- 2. programs: eBPF execution inside a compartment ---- */
 
+/* ---- 4. regions: VRT-backed helper memory ----
+ * One virtual region table row backing the interpreter's grid helpers.
+ * The verifier derives helper permissions from the region; the hardware
+ * row contains every helper access even if the software mask were
+ * subverted. Perm encoding matches the PMP engine's R/W/X bits. */
+typedef struct {
+    uint32_t base;               /* the row's base address */
+    uint32_t cells;              /* power of two; the helper index bound */
+    uint32_t perms;              /* IC_REGION_R | IC_REGION_W */
+} ic_region;
+
+#define IC_REGION_R 1u
+#define IC_REGION_W 2u
+
 typedef struct {
     const uint64_t *ins;
     uint32_t        insn_cnt;
@@ -84,7 +98,17 @@ typedef struct {
                                    * still in bounds otherwise, but coverage is
                                    * non-uniform); checked at run. */
     uint32_t        map_cells;
+    const ic_region *region;     /* optional VRT-backed region: the verifier
+                                  * derives helper permissions from it and the
+                                  * supervisor mounts it as a PMP row; NULL =
+                                  * legacy map cells bound */
 } ic_program;
+
+/* Region-aware verification: ic_program_check's static and lattice passes
+ * plus helper-permission gates (helper 1 needs R, helper 2 needs W). A
+ * reject means the program may not run against that region. */
+ic_status ic_program_check_region(const uint64_t *ins, uint32_t cnt,
+                                  const ic_region *r);
 
 typedef struct {
     uint64_t retval;

@@ -277,3 +277,22 @@ ic_status ic_program_check(const uint64_t *ins, uint32_t cnt) {
     }
     return check_regs(ins, cnt);
 }
+
+ic_status ic_program_check_region(const uint64_t *ins, uint32_t cnt,
+                                  const ic_region *r) {
+    if (!r || !r->cells || (r->cells & (r->cells - 1u)) != 0u ||
+        (r->perms & ~(IC_REGION_R | IC_REGION_W)) != 0u)
+        return IC_ERR_ARGUMENT;
+    for (uint32_t pc = 0; pc < cnt; pc++) {
+        uint64_t e = ins[pc];
+        uint8_t op = (uint8_t)(e & 0xffu);
+        if ((op & 0x07u) == 0x05u && (op & 0xf0u) == 0x80u) {
+            uint32_t h = (uint32_t)((e >> 32) & 0xffffffffu);
+            if (h == 1u && !(r->perms & IC_REGION_R))
+                return IC_ERR_VALIDATE;
+            if (h == 2u && !(r->perms & IC_REGION_W))
+                return IC_ERR_VALIDATE;
+        }
+    }
+    return ic_program_check(ins, cnt);
+}

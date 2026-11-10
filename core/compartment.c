@@ -1,13 +1,14 @@
-/* compartment.c: time-multiplexed PMP compartments. One NAPOT pair
- * (entry0 = SRAM, entry1 = text) is re-armed per switch; entry3 stays the
- * static deny-all filler. Re-arming the same compartment is skipped.
- * A faulting compartment is evicted: the trap path saves its frame into
- * the TCB and wipes the register file, the supervisor marks it dead here,
- * and the schedule moves on without it (Tock-style, no collateral). */
+/* compartment.c: time-multiplexed PMP compartments driven by the VRT
+ * engine (core/pmp/). Each compartment owns one icp_state whose region
+ * table is the authority; the two hot rows are pinned into entry0/1 at
+ * arm, entry2 stays the on-demand slot, entry3 stays deny-all. A faulting
+ * compartment is evicted: the trap path saves its frame into the TCB and
+ * wipes the register file, the supervisor marks it dead here, and the
+ * schedule moves on without it (Tock-style, no collateral). */
 
 #include <stdint.h>
 #include "compartment.h"
-#include "platform.h"
+#include "pmp/icp.h"
 
 #define COMP_COUNT 4u
 
@@ -28,19 +29,20 @@ _Static_assert(sizeof(struct compartment) == sizeof(ic_compartment_spec)
 static struct compartment comps[COMP_COUNT]
     __attribute__((section(".comp_state"), aligned(8), used));
 
+static icp_state dom[IC_DOM_MAX]
+    __attribute__((section(".pmp_state"), aligned(8), used));
+
 volatile uint32_t cur_tcb;      /* TCB of the running compartment, for ecall */
 volatile uint32_t cur_comp;     /* forensics attribution */
-volatile uint32_t g_cfgw;       /* last cfgw written: QingKe pmpcfg reads
-                                   back noise, so board drills verify the
-                                   armed policy through this mirror */
-
-static void csr_set(unsigned csr, uint32_t v) {
-    __asm__ volatile ("csrw %0, %1" :: "n" (csr), "r" (v) : "memory");
-}
 
 void compartment_set(unsigned i, const ic_compartment_spec *spec,
                      uint32_t entry) {
+    icp_state *d;
     if (i >= COMP_COUNT) return;
+    d = &dom[i];
+    icp_init(d);
+    icp_mount(d, spec->sram_base, spec->sram_size, ICP_R | ICP_W);
+    icp_mount(d, spec->text_base, spec->text_size, ICP_R | ICP_X);
     comps[i].spec = *spec;
     comps[i].entry = entry;
     comps[i].armed = 0u;        /* instantiation invalidates prior arming */
@@ -48,16 +50,18 @@ void compartment_set(unsigned i, const ic_compartment_spec *spec,
     for (unsigned j = 0; j < 32u; j++) comps[i].tcb[j] = 0u;
 }
 
+/* extra VRT rows between set and arm: the region lands as an overflow row
+ * and the fill path swaps it in on first use */
+void compartment_extend(unsigned i, uint32_t base, uint32_t size,
+                        uint32_t perms) {
+    if (i >= COMP_COUNT) return;
+    icp_mount(&dom[i], base, size, perms);
+}
+
 void compartment_arm(unsigned i) {
     if (i >= COMP_COUNT || comps[i].armed) return;
-    uint32_t cfgw = 0x1Bu | (0x1Du << 8) | (0x00u << 16) | (0x18u << 24);
-    csr_set(0x3a0, 0u);
-    csr_set(0x3b0, NAPOT(comps[i].spec.sram_base, comps[i].spec.sram_size));
-    csr_set(0x3b1, NAPOT(comps[i].spec.text_base, comps[i].spec.text_size));
-    csr_set(0x3b2, 0u);
-    csr_set(0x3b3, PMP_DENY);
-    csr_set(0x3a0, cfgw);
-    g_cfgw = cfgw;
+    icp_lock(&dom[i]);
+    icp_arm(&dom[i]);
     for (unsigned j = 0; j < COMP_COUNT; j++) comps[j].armed = 0u;
     comps[i].armed = 1u;
 }
@@ -73,6 +77,10 @@ void compartment_evict(unsigned i) {
 
 unsigned compartment_evicted(unsigned i) {
     return (i < COMP_COUNT) ? comps[i].evicted : 1u;
+}
+
+unsigned compartment_swaps(unsigned i) {
+    return (i < COMP_COUNT) ? dom[i].swaps : 0u;
 }
 
 /* Enter compartment i: restore its TCB into the register file (zeros on

@@ -5,3 +5,19 @@ __pycache__/
 tools/swarm_chunk.bin
 swarm_chunk.bin
 *.elf
+
+# local-only research artifacts
+lazypmp/
+fuzz/
+formal/
+interclus_commit/
+lazymm_run_qemu.sh
+docs/backup/
+docs/inter.docx
+docs/puppeteer-config.json
+
+# internal design documents (local only)
+docs/技术创新点.md
+docs/方案测试及总结.md
+docs/设计方案.md
+docs/images/

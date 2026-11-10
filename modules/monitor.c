@@ -30,7 +30,7 @@ static void native_filter(void) {
 }
 
 void monitor_main(void) {
-    struct ebpf_prog prog;
+    struct ebpf_prog prog = { 0 };
     struct ebpf_result r;
     int i;
 
@@ -38,12 +38,13 @@ void monitor_main(void) {
     case 2u:                                  
         native_filter();
         break;
-    case 1u:                                  
-        for (i = 0; i < (int)MAP_CELLS; i++) MON_MAP[i] = 0;  
+    case 1u:
+        for (i = 0; i < (int)MAP_CELLS; i++) MON_MAP[i] = 0;
         prog.ins = POLICY_CONFLICT;
         prog.insn_cnt = POLICY_CONFLICT_CNT;
         prog.map = (uint32_t *)MON_MAP;
         prog.map_cells = MAP_CELLS;
+        prog.region = IC_MAP_REGION();
         prog.max_steps = 1000000u;
         {
             uint32_t al = 0;

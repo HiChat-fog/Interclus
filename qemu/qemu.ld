@@ -27,6 +27,10 @@ SECTIONS {
     sha256.o(.text .text.*)
     main_pmp.o(.text .text.*)
     trap_pmp.o(.text .text.*)
+    compartment.o(.text .text.*)
+    pmp_icp.o(.text .text.*)
+    pmp_port.o(.text .text.*)
+    fill_test.o(.text .text.*)
     pmp_audit.o(.rodata .rodata.*)
     main_qemu.o(.rodata .rodata.*)
     load_test.o(.rodata .rodata.*)
@@ -46,6 +50,9 @@ SECTIONS {
     sha256.o(.rodata .rodata.*)
     main_pmp.o(.rodata .rodata.*)
     trap_pmp.o(.rodata .rodata.*)
+    pmp_icp.o(.rodata .rodata.*)
+    pmp_port.o(.rodata .rodata.*)
+    fill_test.o(.rodata .rodata.*)
     . = ALIGN(4);
   } > RAM
 
@@ -70,12 +77,18 @@ SECTIONS {
     sha256.o(.data .data.*)
     main_pmp.o(.data .data.*)
     trap_pmp.o(.data .data.*)
+    pmp_icp.o(.data .data.* .sdata .sbss)
+    pmp_port.o(.data .data.* .sdata .sbss)
+    fill_test.o(.data .data.*)
     . = ALIGN(4);
   } > RAM
 
   .bss : {
     pmp_audit.o(.bss .bss.* .sbss .sdata COMMON)
     compartment.o(.bss .bss.* .sbss .sdata COMMON)
+    pmp_icp.o(.bss .bss.* .sbss .sdata COMMON)
+    pmp_port.o(.bss .bss.* .sbss .sdata COMMON)
+    fill_test.o(.bss .bss.* COMMON)
     main_qemu.o(.bss .bss.* COMMON)
     load_test.o(.bss .bss.* COMMON)
     load_urx.o(.bss .bss.* COMMON)
@@ -110,6 +123,23 @@ SECTIONS {
   .trap_scratch 0x80010F00 (NOLOAD) : { KEEP(*(.trap_scratch)) } > RAM
 
   .mailbox 0x80011000 : { KEEP(*(.mailbox)) } > RAM
+
+  /* per-domain VRT states and the fill-path stack: between the mailbox
+   * and the channel staging island */
+  .pmp_state 0x80011B00 (NOLOAD) : {
+    __pmp_start = .;
+    KEEP(*(.pmp_state))
+    . = ALIGN(4);
+    __pmp_end = .;
+  }
+  ASSERT(__pmp_end <= 0x80011E00, "pmp state overruns the fill scratch")
+
+  /* swap-in drill probe windows: pinned row, pinned text, overflow row,
+   * overflow-exec row, and a cross-domain row outside every drill VRT */
+  .probe_text 0x80220000 : { fill_test.o(.probe.text .probe.text.*) } > RAM
+  .probe_ram 0x80221000 (NOLOAD) : { fill_test.o(.probe.data) } > RAM
+  .probe_swap 0x80222000 (NOLOAD) : { fill_test.o(.probe.swap) } > RAM
+  .probe_far 0x80223000 : { fill_test.o(.probe.far) } > RAM
 
   /* runtime channel staging (E21): after the mailbox, before the monitor
    * window; islands stay strictly ascending (E15/E18) */

@@ -1,6 +1,18 @@
 
     .section .text
     .align 4
+
+/* state layout mirrors core/pmp/icp.h (_Static_asserts pin the sync) */
+.set ICP_VRT_N,    0
+.set ICP_VRT_ROWS, 8
+.set ICP_ROW_BASE, 0
+.set ICP_ROW_SIZE, 4
+.set ICP_ROW_PERM, 8
+.set ICP_ROW_PADD, 12
+.set ICP_ROW_SZ,   16
+.set ICP_ST_SWAPS, 136
+.set ICP_ST_CFG0,  144
+
     .globl trap_entry
 trap_entry:
     /* unified trap frame on the M-mode scratch stack: the scratch regs are
@@ -22,7 +34,14 @@ trap_entry:
     sw   t0, 40(sp)
     li   t1, 8
     beq  t0, t1, .Lecall
+    li   t1, 5
+    beq  t0, t1, .LfL
+    li   t1, 7
+    beq  t0, t1, .LfS
+    li   t1, 1
+    beq  t0, t1, .LfF
 
+.Lring:
     csrr t0, mtval
     sw   t0, 44(sp)
 
@@ -196,6 +215,76 @@ trap_entry:
     csrrw sp, mscratch, sp      /* back to the interrupted sp */
     mret
 
+/* U-mode load/store/fetch access fault: a VRT-covered address with the
+ * operation granted is an uncached row, not a violation. The fill runs
+ * inline on t0-t6 (all parked in the trap frame) and never touches
+ * ra/a0/a1, mscratch keeps the victim sp throughout, and RETRY restores
+ * the clobbered set with mepc unchanged. A VRT miss or a permission
+ * denial falls into the evidence path as a violation. */
+.LfL:
+    li   t5, 1
+    j    .Lcand
+.LfS:
+    li   t5, 2
+    j    .Lcand
+.LfF:
+    li   t5, 4
+.Lcand:
+    csrr t1, mstatus
+    srli t1, t1, 11
+    andi t1, t1, 3
+    beqz t1, .Lfill
+    j    .Lring
+
+.Lfill:
+    lui  t1, %hi(icp_cur)
+    lw   t2, %lo(icp_cur)(t1)
+    csrr t3, mtval
+    lw   t4, ICP_VRT_N(t2)
+    addi t6, t2, ICP_VRT_ROWS
+1:
+    beqz t4, .Lring
+    lw   t0, ICP_ROW_BASE(t6)
+    lw   t1, ICP_ROW_SIZE(t6)
+    sub  t0, t3, t0
+    sltu t0, t0, t1
+    beqz t0, 2f
+    lw   t1, ICP_ROW_PERM(t6)
+    and  t1, t1, t5
+    beqz t1, .Lring
+    j    3f
+2:
+    addi t6, t6, ICP_ROW_SZ
+    addi t4, t4, -1
+    j    1b
+3:
+    lw   t0, ICP_ROW_PADD(t6)
+    lw   t1, ICP_ROW_PERM(t6)
+    lbu  t4, ICP_ROW_PADD(t6)
+    ori  t1, t1, 0x18
+    slli t1, t1, 16
+    lw   t4, ICP_ST_CFG0(t2)
+    or   t1, t1, t4
+    csrw 0x3b2, t0
+    fence rw, rw
+    csrw 0x3a0, t1
+    fence rw, rw
+    lui  t0, %hi(g_cfgw)
+    lw   t4, ICP_ST_SWAPS(t2)
+    sw   t1, %lo(g_cfgw)(t0)
+    addi t4, t4, 1
+    sw   t4, ICP_ST_SWAPS(t2)
+    lw   x5, 4(sp)
+    lw   x6, 8(sp)
+    lw   x7, 12(sp)
+    lw   x28, 24(sp)
+    lw   x29, 28(sp)
+    lw   x30, 32(sp)
+    lw   x31, 36(sp)
+    addi sp, sp, 48
+    csrrw sp, mscratch, sp
+    mret
+
 .Lecall:
     /* park the compartment's register file in its TCB, then leave the
      * live registers zeroed: the next compartment inherits nothing */
@@ -291,3 +380,4 @@ trap_sp0:
     .space 64                   /* fault-path scratch; pinned by the linker
                                    scripts, U-mode never sees it */
 trap_sp0_top:
+

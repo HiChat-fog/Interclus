@@ -7,6 +7,10 @@ jobs:
       - uses: actions/checkout@v4
       - run: gcc -O2 -ffreestanding -o test_host tests/test_host.c core/ebpf.c core/helpers.c core/frame.c
       - run: ./test_host
+      - run: gcc -O2 -ffreestanding -o test_pmp tests/test_pmp.c core/pmp/icp.c
+      - run: ./test_pmp
+      - run: gcc -O2 -ffreestanding -o test_verifier tests/test_verifier.c core/loader.c
+      - run: ./test_verifier
   firmware-build:
     runs-on: ubuntu-latest
     steps:
@@ -57,3 +61,5 @@ jobs:
           grep -q "== TRUST PASS ==" trust.log
           timeout 30 qemu-system-riscv32 -M virt -bios none -kernel build/fw_budget.elf -display none -serial stdio -monitor none < /dev/null | tee budget.log
           grep -q "== BUDGET PASS ==" budget.log
+          timeout 30 qemu-system-riscv32 -M virt -bios none -kernel build/fw_fill.elf -nographic | tee fill.log
+          grep -q "== FILL PASS ==" fill.log

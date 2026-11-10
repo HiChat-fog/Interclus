@@ -25,7 +25,17 @@ _start:
     addi    t0, t0, 4
     j       3b
 4:
-    call    boot_main
+    lui     t0, %hi(__pmp_start)
+    addi    t0, t0, %lo(__pmp_start)
+    lui     t1, %hi(__pmp_end)
+    addi    t1, t1, %lo(__pmp_end)
 5:
-    wfi
+    bgeu    t0, t1, 6f
+    sw      zero, 0(t0)
+    addi    t0, t0, 4
     j       5b
+6:
+    call    boot_main
+7:
+    wfi
+    j       7b

@@ -3,6 +3,7 @@
 #define EBPF_MINI_H
 
 #include <stdint.h>
+#include "contract.h"
 
 #define EBPF_OK            0
 #define EBPF_FAULT_PC      1  
@@ -21,13 +22,14 @@ struct ebpf_insn { uint8_t opcode, dst, src; int16_t off; int32_t imm; };
 #define EBPF_MAX_INSNS 64u
 
 struct ebpf_prog {
-    const uint64_t *ins;      
+    const uint64_t *ins;
     uint32_t       insn_cnt;
-    const uint8_t  *ctx;      
+    const uint8_t  *ctx;
     uint32_t       ctx_size;
     uint32_t       max_steps;
-    uint32_t       *map;      
-    uint32_t       map_cells; 
+    uint32_t       *map;
+    uint32_t       map_cells;
+    const ic_region *region;    /* NULL: legacy map_cells bound */
 };
 
 struct ebpf_result {

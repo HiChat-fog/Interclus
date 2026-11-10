@@ -53,10 +53,21 @@ SECTIONS {
     . = ALIGN(4);
     __comp_end = .;
   }
+  /* per-domain VRT states and the fill-path stack: comp_state ends at
+     0x200011B0; VUART claims 0x20001700 */
+  .pmp_state 0x200011B0 (NOLOAD) : {
+    __pmp_start = .;
+    KEEP(*(.pmp_state))
+    . = ALIGN(4);
+    __pmp_end = .;
+  }
+  ASSERT(__pmp_end <= 0x20001700, "pmp state overruns the board reserve")
   .meas_res 0x20001900 (NOLOAD) : {
     KEEP(*(.meas_res))
   }
-  ASSERT(SIZEOF(.text) <= 0x3800, "supervisor .text overflows the supervisor window")
+  /* the hard boundary is the monitor window at 0x08004000: supervisor
+     .text plus its engine must stay under it with guard band */
+  ASSERT(SIZEOF(.text) <= 0x3D00, "supervisor .text overflows the supervisor window")
   /* E25: the top two flash pages hold the slot mirror (0x8077000..0x8078000);
      the firmware image must never grow into them */
 

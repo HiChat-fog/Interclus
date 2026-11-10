@@ -136,6 +136,10 @@ static uint32_t boot_gate(void) {
         if (!spec_match(&ic_comp_native, &nat)) return 11u;
         if (ic_compartment_check(&nat2) != IC_OK) return 12u;
     }
+    /* the screening policy must verify against the VRT-backed map region:
+     * helper permissions and the region bound are part of the boot gate */
+    if (ic_program_check_region(POLICY_CONFLICT, POLICY_CONFLICT_CNT,
+                                IC_MAP_REGION()) != IC_OK) return 13u;
     return 0u;
 }
 
@@ -382,13 +386,16 @@ static void schedule_round(void) {
     for (uint32_t c = 0; c < MAP_CELLS; c++) MON_MAP[c] = 0;
 
     compartment_set(0u, &ic_comp_monitor, (uint32_t)monitor_entry - MON_TEXT);
+    compartment_extend(0u, MAP_BOX, 0x1000u, IC_REGION_R | IC_REGION_W);
     compartment_set(1u, &ic_comp_attacker, (uint32_t)attacker_entry - ATK_TEXT);
     {   /* the native window follows the live table entry: the next
            compartment_arm rewrites the PMP pair onto that slot's base —
-           the schedule-boundary remap (S_REMAP pins its cost) */
+           the schedule-boundary remap (S_REMAP pins its cost). Each slot
+           owns its own compartment index (2 + slot), so a remap is a
+           domain switch, and the other slot's grant never coexists. */
         ic_compartment_spec s;
         nat_spec(g_nat_live, &s);
-        compartment_set(2u, &s, g_nat[g_nat_live].entry);
+        compartment_set(2u + g_nat_live, &s, g_nat[g_nat_live].entry);
         *(volatile uint32_t *)(g_nat_live ? NAT2_SRAM : NAT_SRAM) = 0u;
     }
     compartment_arm(0u);
@@ -503,8 +510,8 @@ void hot_swap(void) {
         {   /* remap drill: rewrite the exec pair onto the new base now —
              * the same CSR sequence the schedule boundary repeats */
             uint32_t t0 = TIMER_NOW();
-            compartment_set(2u, &s, entry);
-            compartment_arm(2u);
+            compartment_set(2u + slot, &s, entry);
+            compartment_arm(2u + slot);
             STATUS[S_REMAP] = TIMER_NOW() - t0;
         }
     } else if (kind == PEND_EBPF) {
@@ -767,7 +774,7 @@ static void atk_advance(void) {
     }
     STATUS[S_NSLOT] = g_nat_live;
     g_phase = 5;
-    enter_checked(2u);
+    enter_checked(2u + g_nat_live);
 }
 
 static void native_done(uint32_t proof) {
@@ -831,7 +838,7 @@ void supervisor_fault(uint32_t yuanyin, uint32_t zhi) {
          * dead retires the native phase for the session. The evicted
          * round produces no proof (S_NAT2 reads zero), and the remap
          * counts as a rollback to last-known-good. */
-        if (cur_comp == 2u) {
+        if (cur_comp >= 2u) {
             uint32_t dead = g_nat_live;
             uint32_t other = dead ^ 1u;
             g_nat[dead].evicted = 1u;

@@ -12,8 +12,10 @@ $CC -DQEMU_TARGET -c ../core/trap.S -o trap_pmp.o
 $CC -DQEMU_TARGET -c ../core/loader.c -o loader.o
 $CC -DQEMU_TARGET -c ../core/uart.c -o uart.o
 $CC -DQEMU_TARGET -c ../core/compartment.c -o compartment.o
+$CC -DQEMU_TARGET -c ../core/pmp/icp.c -o pmp_icp.o
+$CC -DQEMU_TARGET -c ../core/pmp/icp_port.c -o pmp_port.o
 $LLD -flavor gnu -T ../qemu/qemu.ld -nostdlib -o fw_meas_qemu.elf \
-    measure.o trap_pmp.o loader.o uart.o compartment.o
+    measure.o trap_pmp.o loader.o uart.o compartment.o pmp_icp.o pmp_port.o
 
 # board variant (fresh compile: platform.h values differ per target)
 $CC -c ../modules/measure.c -o measure.o
@@ -21,8 +23,10 @@ $CC -c ../core/trap.S -o trap_pmp.o
 $CC -c ../core/loader.c -o loader.o
 $CC -c ../core/uart.c -o uart.o
 $CC -c ../core/compartment.c -o compartment.o
+$CC -c ../core/pmp/icp.c -o pmp_icp.o
+$CC -c ../core/pmp/icp_port.c -o pmp_port.o
 $CC -c ../startup.S -o startup.o
 $LLD -flavor gnu -T ../modules/board.ld -nostdlib -o fw_meas.elf \
-    startup.o measure.o trap_pmp.o loader.o uart.o compartment.o
+    startup.o measure.o trap_pmp.o loader.o uart.o compartment.o pmp_icp.o pmp_port.o
 riscv64-unknown-elf-objcopy -O binary --only-section=.text fw_meas.elf fw_meas.bin
 echo "build/fw_meas_qemu.elf build/fw_meas.bin"

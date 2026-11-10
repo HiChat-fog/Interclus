@@ -6,6 +6,8 @@
 
 volatile int g_report_ok;
 
+unsigned compartment_swaps(unsigned i);
+
 #define MON_RESULTS  ((volatile uint32_t *)(MON_BOX + 0x200u))
 #define MON_INPUT_W  ((volatile uint32_t *)(MON_BOX + 0x80u))
 
@@ -38,11 +40,14 @@ int report(void) {
     }
 
     uint32_t board_alerts = STATUS[S_JINGBAO];
+    /* the map's VRT row must have been swapped in exactly once: the first
+     * screening helper access fills entry2, everything after is cached */
+    uint32_t map_swaps = compartment_swaps(0u);
     uint32_t ok = (board_alerts == mirror_alerts) && STATUS[S_NATOK] &&
                   STATUS[S_VINTACT] && STATUS[S_IINTACT] &&
                   STATUS[S_OWNOOK] && STATUS[S_RDROK] &&
                   STATUS[S_NAT2] == 0xC0DE0002u &&
-                  STATUS[S_INTER] == 5u;
+                  STATUS[S_INTER] == 5u && map_swaps == 1u;
     for (int i = 0; i < 6; i++) {
         if (STATUS[S_CAIJUE + i] != want[i]) ok = 0;
     }
@@ -85,6 +90,8 @@ int report(void) {
     uart_putdec(svok);
     uart_puts(" nat2=");
     uart_putdec(STATUS[S_NAT2] == 0xC0DE0002u);
+    uart_puts(" swaps=");
+    uart_putdec(map_swaps);
     uart_puts("\n");
     g_report_ok = ok;
     uart_puts(ok ? "== MATCH ==\n" : "== MISMATCH ==\n");
