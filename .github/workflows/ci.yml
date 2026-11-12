@@ -12,7 +12,7 @@ jobs:
       - run: gcc -O2 -ffreestanding -o test_verifier tests/test_verifier.c core/loader.c
       - run: ./test_verifier
   firmware-build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y clang lld gcc-riscv64-unknown-elf
@@ -34,7 +34,7 @@ jobs:
             build/fw_pmp.bin
             build/pmp_probe.bin
   qemu-pipeline:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y clang lld qemu-system gcc-riscv64-unknown-elf
