@@ -51,6 +51,23 @@ $LLD $LLDFLAGS -T ../modules/native.ld --defsym NAT_TEXT_BASE=0x2000C000 \
     -nostdlib -o native_trap_s1.elf native_trap_s1.o
 riscv64-unknown-elf-objcopy -O binary --only-section=.text native_trap_s1.elf native_trap_s1.bin
 $CC -c ../modules/examples/native_spin.c -o native_spin_s1.o -DNAT_SRAM_BASE=0x2000D000
+# QEMU-linked variants feed the shared trust digest table
+$CC -DQEMU_TARGET -c ../modules/examples/native_variant.c -o native_variant_q.o -DNAT_SRAM_BASE=0x80211000
+$LLD $LLDFLAGS -T ../modules/native.ld --defsym NAT_TEXT_BASE=0x80210000 \
+    -nostdlib -o native_variant_q.elf native_variant_q.o
+riscv64-unknown-elf-objcopy -O binary --only-section=.text native_variant_q.elf native_variant_qemu.bin
+$CC -DQEMU_TARGET -c ../modules/examples/native_variant.c -o native_variant_s1_q.o -DNAT_SRAM_BASE=0x80213000
+$LLD $LLDFLAGS -T ../modules/native.ld --defsym NAT_TEXT_BASE=0x80212000 \
+    -nostdlib -o native_variant_s1_q.elf native_variant_s1_q.o
+riscv64-unknown-elf-objcopy -O binary --only-section=.text native_variant_s1_q.elf native_variant_s1_qemu.bin
+$CC -DQEMU_TARGET -c ../modules/examples/native_trap.c -o native_trap_q.o -DNAT_SRAM_BASE=0x80211000
+$LLD $LLDFLAGS -T ../modules/native.ld --defsym NAT_TEXT_BASE=0x80210000 \
+    -nostdlib -o native_trap_q.elf native_trap_q.o
+riscv64-unknown-elf-objcopy -O binary --only-section=.text native_trap_q.elf native_trap_qemu.bin
+$CC -DQEMU_TARGET -c ../modules/examples/native_trap.c -o native_trap_s1_q.o -DNAT_SRAM_BASE=0x80213000
+$LLD $LLDFLAGS -T ../modules/native.ld --defsym NAT_TEXT_BASE=0x80212000 \
+    -nostdlib -o native_trap_s1_q.elf native_trap_s1_q.o
+riscv64-unknown-elf-objcopy -O binary --only-section=.text native_trap_s1_q.elf native_trap_s1_qemu.bin
 $CC -c ../modules/examples/canary_mod.c -o canary_mod.o -DNAT_SRAM_BASE=0x2000B000
 $LLD $LLDFLAGS -T ../modules/native.ld --defsym NAT_TEXT_BASE=0x2000A000 \
     -nostdlib -o canary.elf canary_mod.o
