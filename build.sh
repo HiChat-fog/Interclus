@@ -5,7 +5,7 @@ mkdir -p "$REPO/build"
 cd "$REPO/build"
 CC="clang --target=riscv32 -march=rv32imafc -mabi=ilp32 -mno-relax -msmall-data-limit=0 -ffreestanding -O2"
 LLD="${LLD:-$HOME/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld}"
-# 对象文件须以 monitor.o / attacker.o 基名参与链接（链接脚本按文件名分配舱室段）
+# Object files must link with monitor.o / attacker.o basenames (linker assigns compartments by filename).
 $CC -c ../startup.S -o startup.o
 $CC -c ../qemu/pmp_audit.c -o pmp_audit_b.o
 $CC -c ../core/compartment.c -o compartment_b.o
@@ -67,7 +67,9 @@ python3 ../tools/sign_module.py --emit-header >/dev/null
 $CC -Os -c ../modules/supervisor.c -o main_pmp.o
 $LLD -flavor gnu -T ../modules/board.ld -nostdlib -o fw_pmp.elf \
     startup.o main_pmp.o monitor.o attacker.o trap_pmp.o loader.o uart.o frame.o flash.o sha256.o update.o compartment.o pmp_icp.o pmp_port.o native_blob.o
-riscv64-unknown-elf-objcopy -O binary --only-section=.text --only-section=.monitor_text --only-section=.attacker_text --only-section=.native_blob fw_pmp.elf fw_pmp.bin
+riscv64-unknown-elf-objcopy -O binary --only-section=.text --only-section=.monitor_text \
+    --only-section=.attacker_text --only-section=.native_blob --only-section=.vfy_text \
+    fw_pmp.elf fw_pmp.bin
 $CC -c ../modules/pmp_probe.c -o pmp_probe.o
 $LLD -flavor gnu -T ../modules/probe.ld -nostdlib -o pmp_probe.elf pmp_probe.o
 riscv64-unknown-elf-objcopy -O binary pmp_probe.elf pmp_probe.bin

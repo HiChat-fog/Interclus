@@ -110,6 +110,11 @@ typedef struct {
 ic_status ic_program_check_region(const uint64_t *ins, uint32_t cnt,
                                   const ic_region *r);
 
+/* Full static proof: the region gate plus ctx-bound and bounded-loop
+ * proofs. ctx_size > 0 requires every LDX offset to fit inside it. */
+ic_status ic_program_check_ctx(const uint64_t *ins, uint32_t cnt,
+                               uint32_t ctx_size, const ic_region *region);
+
 typedef struct {
     uint64_t retval;
     uint32_t insns_executed;

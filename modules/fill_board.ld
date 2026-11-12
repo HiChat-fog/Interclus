@@ -13,10 +13,10 @@ SECTIONS {
   } > FLASH
   .probe_text 0x08003000 : { fill_test.o(.probe.text .probe.text.*) } > FLASH
   .probe_far 0x08003400 : { fill_test.o(.probe.far) } > FLASH
-  .data : { fill_test.o(.data .data.* .sdata .sbss) } > RAM
+  .data : { *(.data .data.* .sdata .sbss) } > RAM
   .bss : {
     __bss_start = .;
-    fill_test.o(.bss .bss.* COMMON)
+    *(.bss .bss.* COMMON)
     . = ALIGN(4);
     __bss_end = .;
   } > RAM

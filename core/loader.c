@@ -7,6 +7,7 @@
 #include "loader.h"
 
 #define IC_MIN_REGION 0x400u
+#define IC_VFY __attribute__((section(".vfy_text")))
 
 static int region_ok(uint32_t base, uint32_t size) {
     return base % 0x1000u == 0 && size >= IC_MIN_REGION &&
@@ -84,7 +85,10 @@ static int opcode_known(uint8_t op) {
 #define T_BOTTOM 0x0u
 #define T_SCALAR 0x1u
 #define T_CTX    0x2u
+#define T_WIDE   0x3u
 #define T_MASK   0x3u
+#define R_CNT    11u
+#define IC_LOOP_MAX (1u << 20)
 
 static uint32_t reg_type(uint32_t st, uint8_t r) {
     return (st >> (2u * r)) & T_MASK;
@@ -157,85 +161,355 @@ static int insn_succ(uint64_t e, uint32_t pc, uint32_t succ[2]) {
     return 1;
 }
 
-static ic_status check_regs(const uint64_t *ins, uint32_t cnt) {
-    uint32_t in_m[IC_PROG_MAX_INSNS];
-    uint8_t pending[IC_PROG_MAX_INSNS];
-    /* lattice: per register 00 BOTTOM (unwritten on some path), 01
-     * SCALAR, 10 PTR_CTX, 11 TOP (unconstrained — the optimistic
-     * start that lets loop heads converge; & meets it down). */
+typedef struct {
+    uint32_t type;
+    uint32_t lo[R_CNT], hi[R_CNT];
+} vstate;
+
+_Static_assert(sizeof(vstate) == 92u, "workspace layout");
+
+static IC_VFY void st_init(vstate *s) {
+    s->type = 0u;
+    for (uint32_t r = 0; r < R_CNT; r++) s->lo[r] = s->hi[r] = 0u;
+}
+
+static IC_VFY void st_iv(vstate *s, uint8_t r, uint64_t lo, uint64_t hi) {
+    if (lo > hi || hi > 0xFFFFFFFFull) {
+        s->type = set_type(s->type, r, T_WIDE);
+    } else {
+        s->type = set_type(s->type, r, T_SCALAR);
+        s->lo[r] = (uint32_t)lo;
+        s->hi[r] = (uint32_t)hi;
+    }
+}
+
+static IC_VFY uint32_t ceil_mask(uint32_t hi) {
+    uint32_t m = 1u;
+    while (m <= hi && m != 0u) m <<= 1;
+    return m - 1u;
+}
+
+static IC_VFY uint32_t width_of(uint8_t op) {
+    if (op == 0x71u) return 1u;
+    if (op == 0x69u) return 2u;
+    if (op == 0x61u) return 4u;
+    return 8u;
+}
+
+static IC_VFY void st_transfer(const uint64_t e, const vstate *in, vstate *out) {
+    uint8_t op = (uint8_t)(e & 0xffu);
+    uint8_t cls = op & 0x07u;
+    uint8_t dst = (uint8_t)((e >> 8) & 0x0fu);
+    uint8_t src = (uint8_t)((e >> 12) & 0x0fu);
+    uint8_t hi = op & 0xf0u;
+    *out = *in;
+    if (cls == 0x01u) {
+        if (op == 0x71u) st_iv(out, dst, 0u, 0xFFu);
+        else if (op == 0x69u) st_iv(out, dst, 0u, 0xFFFFu);
+        else if (op == 0x61u) st_iv(out, dst, 0u, 0xFFFFFFFFull);
+        else out->type = set_type(out->type, dst, T_WIDE);
+        return;
+    }
+    if (cls == 0x05u && hi == 0x80u) {
+        uint32_t h = (uint32_t)((e >> 32) & 0xffffffffu);
+        if (h == 2u) st_iv(out, 0u, 0u, 0u);
+        else st_iv(out, 0u, 0u, 0xFFFFFFFFull);
+        return;
+    }
+    if (cls != 0x04u && cls != 0x07u) return;
+    {
+        int is64 = (cls == 0x07u);
+        int wide = 0, wide_rhs = 0;
+        uint32_t lo = 0u, vhi = 0u, rlo = 0u, rhi = 0u;
+        if (hi == 0x80u) {
+            if (reg_type(in->type, dst) == T_SCALAR &&
+                in->lo[dst] == 0u && in->hi[dst] == 0u)
+                st_iv(out, dst, 0u, 0u);
+            else out->type = set_type(out->type, dst, T_WIDE);
+            return;
+        }
+        if (hi == 0xd0u) {
+            uint32_t size = (uint32_t)((e >> 32) & 0xffffffffu);
+            if (reg_type(in->type, dst) == T_SCALAR && in->lo[dst] == in->hi[dst]) {
+                uint64_t v = in->lo[dst];
+                if (size == 16u) v = (uint64_t)__builtin_bswap16((uint16_t)v);
+                else if (size == 32u) v = (uint64_t)__builtin_bswap32((uint32_t)v);
+                else if (size == 64u) v = __builtin_bswap64(v);
+                st_iv(out, dst, v, v);
+            } else out->type = set_type(out->type, dst, T_WIDE);
+            return;
+        }
+        if ((op & 0x08u) == 0u) {
+            int32_t imm = (int32_t)((e >> 32) & 0xffffffffu);
+            if (imm < 0) wide_rhs = 1;
+            else { rlo = rhi = (uint32_t)imm; }
+        } else if (reg_type(in->type, src) == T_SCALAR) {
+            rlo = in->lo[src];
+            rhi = in->hi[src];
+        } else wide_rhs = 1;
+        if (hi == 0xb0u) {
+            if (wide_rhs) out->type = set_type(out->type, dst, T_WIDE);
+            else st_iv(out, dst, rlo, rhi);
+            return;
+        }
+        if (reg_type(in->type, dst) != T_SCALAR) wide = 1;
+        else { lo = in->lo[dst]; vhi = in->hi[dst]; }
+        if (wide || wide_rhs) {
+            out->type = set_type(out->type, dst, T_WIDE);
+            return;
+        }
+        switch (hi) {
+        case 0x00u: st_iv(out, dst, (uint64_t)lo + rlo, (uint64_t)vhi + rhi); break;
+        case 0x10u:
+            if (lo >= rhi) st_iv(out, dst, (uint64_t)lo - rhi, (uint64_t)vhi - rlo);
+            else out->type = set_type(out->type, dst, T_WIDE);
+            break;
+        case 0x20u: st_iv(out, dst, (uint64_t)lo * rlo, (uint64_t)vhi * rhi); break;
+        case 0x30u:
+            if (rlo == 0u) out->type = set_type(out->type, dst, T_WIDE);
+            else st_iv(out, dst, (uint64_t)lo / rhi, (uint64_t)vhi / rlo);
+            break;
+        case 0x90u:
+            if (rlo == 0u) out->type = set_type(out->type, dst, T_WIDE);
+            else {
+                uint32_t m = rhi - 1u;
+                st_iv(out, dst, 0u, vhi < m ? vhi : m);
+            }
+            break;
+        case 0x40u:
+            st_iv(out, dst, lo > rlo ? lo : rlo,
+                  ceil_mask(vhi > rhi ? vhi : rhi));
+            break;
+        case 0x50u:
+            st_iv(out, dst, 0u, vhi < rhi ? vhi : rhi);
+            break;
+        case 0xa0u:
+            st_iv(out, dst, 0u, ceil_mask(vhi > rhi ? vhi : rhi));
+            break;
+        case 0x60u:
+            if (op & 0x08u) { out->type = set_type(out->type, dst, T_WIDE); break; }
+            {
+                uint32_t sh = (uint32_t)((e >> 32) & (is64 ? 63u : 31u));
+                st_iv(out, dst, (uint64_t)lo << sh, (uint64_t)vhi << sh);
+            }
+            break;
+        case 0x70u:
+        case 0xc0u:
+            if (op & 0x08u) { out->type = set_type(out->type, dst, T_WIDE); break; }
+            {
+                uint32_t sh = (uint32_t)((e >> 32) & (is64 ? 63u : 31u));
+                st_iv(out, dst, (uint64_t)lo >> sh, (uint64_t)vhi >> sh);
+            }
+            break;
+        default:
+            out->type = set_type(out->type, dst, T_WIDE);
+        }
+    }
+}
+
+static IC_VFY uint32_t type_join(uint32_t a, uint32_t b) {
+    if (a == b) return a;
+    if (a == T_BOTTOM || b == T_BOTTOM) return T_BOTTOM;
+    return T_WIDE;
+}
+
+static IC_VFY int st_merge(vstate *dst, const vstate *src, uint8_t *seen, int widen) {
+    int ch = 0;
+    if (!*seen) {
+        *dst = *src;
+        *seen = 1u;
+        return 1;
+    }
+    for (uint8_t r = 0; r < R_CNT; r++) {
+        uint32_t ta = reg_type(dst->type, r);
+        uint32_t tb = reg_type(src->type, r);
+        uint32_t tj = type_join(ta, tb);
+        if (tj != ta) {
+            dst->type = set_type(dst->type, r, tj);
+            ch = 1;
+            if (tj == T_SCALAR) {
+                dst->lo[r] = src->lo[r];
+                dst->hi[r] = src->hi[r];
+            } else {
+                dst->lo[r] = 0u;
+                dst->hi[r] = 0u;
+            }
+        } else if (tj == T_SCALAR) {
+            uint32_t nl = dst->lo[r] < src->lo[r] ? dst->lo[r] : src->lo[r];
+            uint32_t nh = dst->hi[r] > src->hi[r] ? dst->hi[r] : src->hi[r];
+            if (widen) {
+                if (nl < dst->lo[r]) nl = 0u;
+                if (nh > dst->hi[r]) nh = 0xFFFFFFFFu;
+            }
+            if (nl != dst->lo[r] || nh != dst->hi[r]) {
+                dst->lo[r] = nl;
+                dst->hi[r] = nh;
+                ch = 1;
+            }
+        }
+    }
+    return ch;
+}
+
+/* bounded-loop proof: straight-line preamble, one exit compare at the
+ * header, a single constant decrement per iteration, one back edge. The
+ * entry interval comes from replaying the preamble through the same
+ * interval transfer, so the bound is an abstract-interpretation result. */
+static IC_VFY int loop_bounded(const uint64_t *ins, uint32_t head, uint32_t tail) {
+    vstate s, out;
+    uint64_t e;
+    uint8_t op, hi, r;
+    int32_t K;
+    uint32_t step = 0, writes = 0;
+    if (head == 0u || tail <= head) return 0;
+    st_init(&s);
+    s.type = set_type(0u, 1u, T_CTX);
+    for (uint32_t pc = 0; pc < head; pc++) {
+        uint32_t sc[2];
+        int ns = insn_succ(ins[pc], pc, sc);
+        if (ns != 1 || sc[0] != pc + 1u) return 0;
+        st_transfer(ins[pc], &s, &out);
+        s = out;
+    }
+    e = ins[head];
+    op = (uint8_t)(e & 0xffu);
+    hi = op & 0xf0u;
+    r = (uint8_t)((e >> 8) & 0x0fu);
+    K = (int32_t)((e >> 32) & 0xffffffffu);
+    if ((op & 0x07u) != 0x05u || (op & 0x08u) || K < 0) return 0;
+    if (hi != 0x10u && hi != 0xa0u && hi != 0xb0u) return 0;  /* JEQ/JLT/JLE */
+    {
+        uint32_t sc[2];
+        int ns = insn_succ(ins[head], head, sc);
+        if (ns != 2) return 0;
+        if (sc[0] != head + 1u || sc[1] <= tail) return 0;
+    }
+    for (uint32_t pc = head + 1u; pc <= tail; pc++) {
+        uint32_t sc[2];
+        int ns = insn_succ(ins[pc], pc, sc);
+        uint32_t want = (pc == tail) ? head : pc + 1u;
+        if (ns != 1 || sc[0] != want) return 0;
+    }
+    for (uint32_t pc = head; pc <= tail; pc++) {
+        uint64_t x = ins[pc];
+        uint8_t xo = (uint8_t)(x & 0xffu);
+        if (!(insn_writes(x) & (1u << r))) continue;
+        writes++;
+        if ((xo & 0x07u) == 0x07u && (xo & 0xf0u) == 0x10u &&
+            (xo & 0x08u) == 0u && ((x >> 8) & 0x0fu) == r &&
+            (int32_t)((x >> 32) & 0xffffffffu) > 0)
+            step = (uint32_t)((x >> 32) & 0xffffffffu);
+        else
+            return 0;
+    }
+    if (writes != 1u || step == 0u) return 0;
+    if (reg_type(s.type, r) != T_SCALAR) return 0;
+    {
+        uint32_t hi_r = s.hi[r];
+        uint64_t iters;
+        if (hi == 0x10u) {
+            if (s.lo[r] != hi_r || hi_r < (uint32_t)K ||
+                ((hi_r - (uint32_t)K) % step) != 0u)
+                return 0;
+            iters = ((uint64_t)hi_r - (uint32_t)K) / step + 1u;
+        } else if (hi == 0xa0u) {
+            if (K == 0) return 0;
+            iters = hi_r >= (uint32_t)K
+                        ? ((uint64_t)hi_r - (uint32_t)K) / step + 1u
+                        : 1u;
+        } else {
+            iters = hi_r > (uint32_t)K
+                        ? ((uint64_t)hi_r - (uint32_t)K) / step + 1u
+                        : 1u;
+        }
+        return iters <= IC_LOOP_MAX;
+    }
+}
+
+static IC_VFY ic_status check_regs_full(const uint64_t *ins, uint32_t cnt,
+                                 uint32_t ctx_size, const ic_region *region,
+                                 ic_vfy_ws *ws) {
+    vstate *st = (vstate *)ws->w;
+    uint8_t *pend = (uint8_t *)(st + IC_PROG_MAX_INSNS);
+    uint8_t *seen = pend + IC_PROG_MAX_INSNS;
     for (uint32_t i = 0; i < cnt; i++) {
-        in_m[i] = 0xFFFFFFFFu;                    /* every reg TOP */
-        pending[i] = 1u;
+        st_init(&st[i]);
+        pend[i] = 0u;
+        seen[i] = 0u;
     }
-    {   /* entry: r1 = ctx pointer, every other register BOTTOM */
-        uint32_t entry = 0u;                      /* all BOTTOM */
-        in_m[0] = set_type(entry, 1, T_CTX);
-    }
+    st[0].type = set_type(st[0].type, 1u, T_CTX);
+    seen[0] = 1u;
+    pend[0] = 1u;
     for (;;) {
         uint32_t pc = cnt;
+        vstate out;
         for (uint32_t i = 0; i < cnt; i++)
-            if (pending[i]) { pc = i; break; }
-        if (pc == cnt) break;                     /* fixed point */
-        pending[pc] = 0;
+            if (pend[i]) { pc = i; break; }
+        if (pc == cnt) break;
+        pend[pc] = 0u;
         {
             uint64_t e = ins[pc];
-            uint8_t op  = (uint8_t)(e & 0xffu);
+            uint8_t op = (uint8_t)(e & 0xffu);
+            uint8_t cls = op & 0x07u;
+            uint8_t hi = op & 0xf0u;
             uint8_t dst = (uint8_t)((e >> 8) & 0x0fu);
             uint8_t src = (uint8_t)((e >> 12) & 0x0fu);
-            uint8_t cls = op & 0x07u, hi = op & 0xf0u;
-            uint32_t st = in_m[pc];
-            /* every register this insn reads must be written (BOTTOM
-             * fails) and carry a type the insn accepts */
-            {
-                uint32_t reads = insn_reads(e);
-                for (uint8_t r = 0; r < 11u; r++) {
-                    if (!(reads & (1u << r))) continue;
-                    uint32_t t = reg_type(st, r);
-                    if (t == T_BOTTOM) return IC_ERR_VALIDATE;
-                    if (cls == 0x01u && t != T_CTX)
-                        return IC_ERR_VALIDATE;   /* LDX base must be ctx */
-                    if ((cls == 0x04u || cls == 0x07u) && t == T_CTX)
-                        return IC_ERR_VALIDATE;   /* ALU over ctx: reject */
+            vstate *in = &st[pc];
+            uint32_t reads = insn_reads(e);
+            for (uint8_t r = 0; r < 11u; r++) {
+                uint32_t t;
+                if (!(reads & (1u << r))) continue;
+                t = reg_type(in->type, r);
+                if (t == T_BOTTOM) return IC_ERR_VALIDATE;
+                if (cls == 0x01u) {
+                    if (t != T_CTX) return IC_ERR_VALIDATE;
+                    if (ctx_size) {
+                        int32_t off = (int16_t)((e >> 16) & 0xffffu);
+                        uint32_t w = width_of(op);
+                        if (off < 0 || (uint32_t)off + w > ctx_size)
+                            return IC_ERR_VALIDATE;
+                    }
                 }
+                if ((cls == 0x04u || cls == 0x07u) && t == T_CTX)
+                    return IC_ERR_VALIDATE;
             }
             if ((cls == 0x04u || cls == 0x07u) &&
                 (hi == 0x30u || hi == 0x90u) && !(op & 0x08u) &&
                 ((e >> 32) & 0xffffffffu) == 0u)
-                return IC_ERR_VALIDATE;           /* div/mod by imm 0 */
-            /* out-state: writes give SCALAR, call clobbers the caller-
-             * saved convention, everything else carries over */
-            uint32_t out = st;
-            {
-                uint32_t writes = insn_writes(e);
-                for (uint8_t r = 0; r < 11u; r++) {
-                    if (writes & (1u << r))
-                        out = set_type(out, r, T_SCALAR);
-                }
-                if ((cls == 0x05u || cls == 0x06u) && hi == 0x80u) {
-                    /* this interpreter's helpers touch only the map
-                     * and r0 — every register is preserved except the
-                     * return value */
-                    out = set_type(out, 0, T_SCALAR);
-                }
+                return IC_ERR_VALIDATE;
+            if (region && cls == 0x05u && hi == 0x80u) {
+                uint32_t h = (uint32_t)((e >> 32) & 0xffffffffu);
+                if (h == 1u && !(region->perms & IC_REGION_R))
+                    return IC_ERR_VALIDATE;
+                if (h == 2u && !(region->perms & IC_REGION_W))
+                    return IC_ERR_VALIDATE;
             }
+            (void)dst; (void)src;
+        }
+        st_transfer(ins[pc], &st[pc], &out);
+        {
             uint32_t succ[2];
-            int ns = insn_succ(e, pc, succ);
+            int ns = insn_succ(ins[pc], pc, succ);
             for (int k = 0; k < ns; k++) {
                 if (succ[k] >= cnt) return IC_ERR_VALIDATE;
-                {
-                    uint32_t merged = in_m[succ[k]] & out;
-                    if (merged != in_m[succ[k]]) {
-                        in_m[succ[k]] = merged;
-                        pending[succ[k]] = 1u;
-                    }
-                }
+                if (st_merge(&st[succ[k]], &out, &seen[succ[k]],
+                             succ[k] <= pc))
+                    pend[succ[k]] = 1u;
             }
+        }
+    }
+    for (uint32_t pc = 0; pc < cnt; pc++) {
+        uint32_t succ[2];
+        int ns = insn_succ(ins[pc], pc, succ);
+        for (int k = 0; k < ns; k++) {
+            if (succ[k] <= pc && !loop_bounded(ins, succ[k], pc))
+                return IC_ERR_VALIDATE;
         }
     }
     return IC_OK;
 }
 
-ic_status ic_program_check(const uint64_t *ins, uint32_t cnt) {
+static IC_VFY ic_status prog_static(const uint64_t *ins, uint32_t cnt) {
     if (!ins || !cnt || cnt > IC_PROG_MAX_INSNS) return IC_ERR_ARGUMENT;
     for (uint32_t pc = 0; pc < cnt; pc++) {
         uint64_t e = ins[pc];
@@ -275,24 +549,37 @@ ic_status ic_program_check(const uint64_t *ins, uint32_t cnt) {
             }
         }
     }
-    return check_regs(ins, cnt);
+    return IC_OK;
 }
 
+IC_VFY
+ic_status ic_program_check_ws(const uint64_t *ins, uint32_t cnt,
+                              uint32_t ctx_size, const ic_region *region,
+                              ic_vfy_ws *ws) {
+    ic_status v;
+    if (!ws) return IC_ERR_ARGUMENT;
+    v = prog_static(ins, cnt);
+    if (v != IC_OK) return v;
+    return check_regs_full(ins, cnt, ctx_size, region, ws);
+}
+
+IC_VFY
+ic_status ic_program_check_ctx(const uint64_t *ins, uint32_t cnt,
+                               uint32_t ctx_size, const ic_region *region) {
+    ic_vfy_ws ws;
+    return ic_program_check_ws(ins, cnt, ctx_size, region, &ws);
+}
+
+IC_VFY
+ic_status ic_program_check(const uint64_t *ins, uint32_t cnt) {
+    return ic_program_check_ctx(ins, cnt, 0u, 0);
+}
+
+IC_VFY
 ic_status ic_program_check_region(const uint64_t *ins, uint32_t cnt,
                                   const ic_region *r) {
     if (!r || !r->cells || (r->cells & (r->cells - 1u)) != 0u ||
         (r->perms & ~(IC_REGION_R | IC_REGION_W)) != 0u)
         return IC_ERR_ARGUMENT;
-    for (uint32_t pc = 0; pc < cnt; pc++) {
-        uint64_t e = ins[pc];
-        uint8_t op = (uint8_t)(e & 0xffu);
-        if ((op & 0x07u) == 0x05u && (op & 0xf0u) == 0x80u) {
-            uint32_t h = (uint32_t)((e >> 32) & 0xffffffffu);
-            if (h == 1u && !(r->perms & IC_REGION_R))
-                return IC_ERR_VALIDATE;
-            if (h == 2u && !(r->perms & IC_REGION_W))
-                return IC_ERR_VALIDATE;
-        }
-    }
-    return ic_program_check(ins, cnt);
+    return ic_program_check_ctx(ins, cnt, 0u, r);
 }

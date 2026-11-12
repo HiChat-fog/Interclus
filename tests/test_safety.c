@@ -61,6 +61,7 @@ int main(void) {
         }
         {
             uint32_t bitmap = 0, pcmin = 0xFFFFFFFFu, pcmax = 0;
+            prog.region = 0;
             prog.ins = ins;
             prog.insn_cnt = cnt;
             prog.map_cells = map_cells;

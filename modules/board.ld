@@ -22,6 +22,13 @@ SECTIONS {
     . = ALIGN(4);
   } > FLASH
   .native_blob : { KEEP(*(.native_blob)) } > FLASH
+  /* the interval verifier runs in M mode and answers to no compartment;
+     it lives outside the supervisor window, above the native blob */
+  .vfy_text 0x0800A000 : {
+    KEEP(*(.vfy_text))
+    . = ALIGN(4);
+  } > FLASH
+  ASSERT(SIZEOF(.vfy_text) <= 0x2000, "verifier text overflows its window")
   .data : {
     *(EXCLUDE_FILE(monitor.o attacker.o) .data .data.*)
     . = ALIGN(4);

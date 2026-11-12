@@ -286,6 +286,8 @@ trap_entry:
     mret
 
 .Lecall:
+    lui  t0, %hi(g_ecall_no)
+    sw   a7, %lo(g_ecall_no)(t0)
     /* park the compartment's register file in its TCB, then leave the
      * live registers zeroed: the next compartment inherits nothing */
     lui  t0, %hi(cur_tcb)
@@ -381,3 +383,8 @@ trap_sp0:
                                    scripts, U-mode never sees it */
 trap_sp0_top:
 
+    .section .bss
+    .align 2
+    .globl g_ecall_no
+g_ecall_no:
+    .space 4

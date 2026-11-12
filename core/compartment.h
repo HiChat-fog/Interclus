@@ -18,6 +18,7 @@ extern volatile uint32_t cur_comp;  /* index of the running compartment */
 
 void compartment_set(unsigned i, const ic_compartment_spec *spec,
                      uint32_t entry);
+void compartment_set_arg(unsigned i, uint32_t sp, uint32_t a0);
 void compartment_extend(unsigned i, uint32_t base, uint32_t size,
                         uint32_t perms);
 void compartment_arm(unsigned i);

@@ -36,6 +36,7 @@ static void run_screen(uint32_t cell, uint32_t n, uint32_t l, uint32_t r) {
     uint32_t map[64];
     uint8_t pkt[42];
     struct ebpf_prog prog;
+    prog.region = 0;
     struct ebpf_result res;
     memset(map, 0, sizeof map);
     map[cell] = n;

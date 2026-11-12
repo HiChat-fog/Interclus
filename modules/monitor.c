@@ -5,12 +5,11 @@
 #include "policies/screening.h"
 #include "../core/helpers.c"
 #include "../core/ebpf.c"
+#include "../core/unit.h"
 
-#include "../core/platform.h"
-
-static void native_filter(void) {
-    for (int i = 0; i < 6; i++) {
-        const volatile uint8_t *p = MON_INPUT + MON_OFF[i];
+static void native_filter(const ic_unit_ctx *c) {
+    for (uint32_t i = 0; i < c->npkt; i++) {
+        const volatile uint8_t *p = c->pkts + c->off[i];
         uint32_t v;
         if (p[0] != 0xFDu) {
             v = 0u;
@@ -25,45 +24,46 @@ static void native_filter(void) {
                 v = (lat > 900000000u) ? 4u : 1u;
             } else v = 1u;
         }
-        MON_NATIVE_VERD[i] = v;
+        c->nverd[i] = v;
     }
 }
 
-void monitor_main(void) {
+void monitor_main(const ic_unit_ctx *c) {
     struct ebpf_prog prog = { 0 };
     struct ebpf_result r;
-    int i;
+    uint32_t i;
 
-    switch (MON_MODE[0]) {
-    case 2u:                                  
-        native_filter();
+    switch (c->mode[0]) {
+    case IC_UNIT_MODE_NATIVE:
+        native_filter(c);
         break;
-    case 1u:
-        for (i = 0; i < (int)MAP_CELLS; i++) MON_MAP[i] = 0;
+    case IC_UNIT_MODE_SCREEN:
+        for (i = 0; i < c->map_cells; i++) c->map[i] = 0;
         prog.ins = POLICY_CONFLICT;
         prog.insn_cnt = POLICY_CONFLICT_CNT;
-        prog.map = (uint32_t *)MON_MAP;
-        prog.map_cells = MAP_CELLS;
-        prog.region = IC_MAP_REGION();
+        prog.map = (uint32_t *)c->map;
+        prog.map_cells = c->map_cells;
+        prog.region = &c->region;
         prog.max_steps = 1000000u;
         {
             uint32_t al = 0;
-            for (i = 0; i < (int)MON_CONFN[0]; i++) {
-                prog.ctx = MON_DATA + MON_SOFF[i];
-                prog.ctx_size = MON_SSIZES[i];
+            uint32_t n = c->swarm_n[0];
+            for (i = 0; i < n; i++) {
+                prog.ctx = (const uint8_t *)(c->swarm + c->soff[i]);
+                prog.ctx_size = c->ssiz[i];
                 ebpf_run(&prog, &r);
-                MON_SCREEN_VERD[i] = (uint32_t)r.retval;
-                MON_SCREEN_INSNS[i] = r.insns_executed;
+                c->screen_verd[i] = (uint32_t)r.retval;
+                c->screen_insns[i] = r.insns_executed;
                 if (r.retval == 5u) al++;
             }
-            DIAG_RUNS[0]++;
-            DIAG_ALRT[0] = al;
+            c->diag[0]++;
+            c->diag[1] = al;
         }
         break;
-    default:                                  
-        if (MON_PROG_CNT[0]) {                
-            prog.ins = (const uint64_t *)MON_PROG;   /* boot-time loaded */
-            prog.insn_cnt = MON_PROG_CNT[0];
+    default:
+        if (c->prog_cnt[0]) {
+            prog.ins = (const uint64_t *)c->prog;
+            prog.insn_cnt = c->prog_cnt[0];
         } else {
             prog.ins = POLICY_MAVLINK;
             prog.insn_cnt = POLICY_MAVLINK_CNT;
@@ -73,19 +73,19 @@ void monitor_main(void) {
         prog.max_steps = 1000000u;
         {
             uint32_t pf = 0;
-            for (i = 0; i < 6; i++) {
-                prog.ctx = (const uint8_t *)(MON_INPUT + MON_OFF[i]);
-                prog.ctx_size = MON_SIZES[i];
+            for (i = 0; i < c->npkt; i++) {
+                prog.ctx = (const uint8_t *)(c->pkts + c->off[i]);
+                prog.ctx_size = c->len[i];
                 ebpf_run(&prog, &r);
-                MON_VERDICTS[i] = (uint32_t)r.retval;
-                MON_INSNS[i] = r.insns_executed;
+                c->mav_verd[i] = (uint32_t)r.retval;
+                c->mav_insns[i] = r.insns_executed;
                 if (r.fault) pf = r.fault;
             }
-            MON_PROG_FAULT[0] = pf;   /* the supervisor rolls back on this */
+            c->mav_fault[0] = pf;
         }
         break;
     }
-    __asm__ volatile ("ecall");
+    ic_unit_yield();
     for (;;) { __asm__ volatile ("wfi"); }
 }
 
@@ -94,8 +94,6 @@ asm(
     ".globl monitor_entry\n"
     ".align 2\n"
     "monitor_entry:\n"
-    "  lui  sp, %hi(_mon_stack_top)\n"
-    "  addi sp, sp, %lo(_mon_stack_top)\n"
     "  lui  t0, %hi(monitor_main)\n"
     "  addi t0, t0, %lo(monitor_main)\n"
     "  jalr t0\n"

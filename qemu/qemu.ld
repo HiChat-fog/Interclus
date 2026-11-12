@@ -30,6 +30,7 @@ SECTIONS {
     compartment.o(.text .text.*)
     pmp_icp.o(.text .text.*)
     pmp_port.o(.text .text.*)
+    loader.o(.vfy_text)
     fill_test.o(.text .text.*)
     pmp_audit.o(.rodata .rodata.*)
     main_qemu.o(.rodata .rodata.*)

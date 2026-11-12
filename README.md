@@ -85,7 +85,7 @@ reference/     firmware image for recorded results
 
 | Gate | Where | Covers |
 | --- | --- | --- |
-| host | 91 checks on x86-64 | verdicts and instruction counts bit-exact, engine invariants, region gate |
+| host | interpreter, engine, verifier suites on x86-64 | verdicts and instruction counts bit-exact, engine invariants, region/range/loop gates |
 | QEMU | full schedule, CI | sweep, load, hot swap, channel, telemetry, persistence, trust, budget, swap-in drill |
 | board | CH32V307 + WCH-LinkE | the recorded numbers from silicon |
 

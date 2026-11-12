@@ -178,6 +178,7 @@ static int benign(uint8_t f) {
 static void run_prog(const uint64_t *ins, uint32_t cnt, int b,
                      struct ebpf_result *r) {
     struct ebpf_prog p;
+    p.region = 0;
     p.ins = ins;
     p.insn_cnt = cnt;
     p.ctx = BATT[b].ctx;
@@ -420,7 +421,7 @@ static const struct {
     { "mod imm0", {E(0xb7,0,0,0,9),E(0x97,0,0,0,0),0,0}, 2, 0, -1, 0, 0, 0 },
     { "fp write", {E(0xb7,0,0,0,1),E(0xb7,10,0,0,2),E(0x95,0,0,0,0)}, 3, 1,
                    EBPF_FAULT_FP, 0, 0, 0 },
-    { "self loop", {E(0xb7,0,0,0,0),E(0x05,0,0,-1,0),E(0x95,0,0,0,0)}, 3, 1,
+    { "self loop", {E(0xb7,0,0,0,0),E(0x05,0,0,-1,0),E(0x95,0,0,0,0)}, 3, 0,
                     EBPF_FAULT_STEPS, 0, 0, 0 },
     { "call 3", {E(0x85,0,0,0,3),0,0,0}, 1, 0, -1, 0, 0, 0 },
     { "call 0", {E(0x85,0,0,0,0),0,0,0}, 1, 0, -1, 0, 0, 0 },
@@ -447,7 +448,7 @@ static const struct {
                         0x0706050403020100ull, 0 },
     { "fallthrough escape", {E(0xb7,0,0,0,1),E(0x15,0,0,-1,0),0,0}, 2, 0,
                               -1, 0, 0, 0 },
-    { "backward ja loop", {E(0xb7,0,0,0,1),E(0x05,0,0,-1,0)}, 2, 1,
+    { "backward ja loop", {E(0xb7,0,0,0,1),E(0x05,0,0,-1,0)}, 2, 0,
                             EBPF_FAULT_STEPS, 0, 0, 0 },
     { "ldxw exit A", {E(0x61,0,1,0,0),E(0x95,0,0,0,0),0,0}, 2, 1, EBPF_OK, 1,
                       0x03020100ull, 0 },

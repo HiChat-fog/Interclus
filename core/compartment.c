@@ -58,6 +58,12 @@ void compartment_extend(unsigned i, uint32_t base, uint32_t size,
     icp_mount(&dom[i], base, size, perms);
 }
 
+void compartment_set_arg(unsigned i, uint32_t sp, uint32_t a0) {
+    if (i >= COMP_COUNT) return;
+    comps[i].tcb[2] = sp;
+    comps[i].tcb[10] = a0;
+}
+
 void compartment_arm(unsigned i) {
     if (i >= COMP_COUNT || comps[i].armed) return;
     icp_lock(&dom[i]);

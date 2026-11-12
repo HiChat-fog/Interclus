@@ -8,6 +8,7 @@
 #include "policies/mavlink.h"
 #include "policies/screening.h"
 #include "../core/update.h"
+#include "../core/unit.h"
 extern int flash_mirror_write(uint32_t slot, const uint8_t *code,
                               uint32_t len, uint32_t entry);
 extern uint32_t flash_mirror_read(uint32_t slot, uint8_t *out,
@@ -37,6 +38,8 @@ extern void attacker_v4(void);
 extern void attacker_v5(void);
 extern void attacker_v6(void);
 extern char trap_sp0_top[];       /* M-mode fault scratch stack, from trap.S */
+extern char _mon_stack_top[];     /* linker-script stack tops */
+extern char _atk_stack_top[];
 extern void *memcpy(void *dst, const void *src, unsigned int n);
 
 volatile uint32_t g_ri_index = 0;
@@ -76,6 +79,44 @@ static void enter_checked(unsigned i);
 static void schedule_round(void);
 static void heartbeat(void);
 static void native_done(uint32_t proof);
+
+/* self host: place each workload's context inside its own box and point
+ * every slot at the legacy map. A Lecs host fills the same struct. */
+static void unit_ctx_init(void) {
+    ic_unit_ctx *m = (ic_unit_ctx *)(MON_BOX + 0x800u);
+    ic_unit_ctx *a = (ic_unit_ctx *)(ATK_BOX + 0x100u);
+    m->abi = IC_UNIT_ABI;
+    m->mode = MON_MODE;
+    m->pkts = MON_INPUT;
+    m->off = MON_OFF;
+    m->len = MON_SIZES;
+    m->npkt = 6u;
+    m->map = MON_MAP;
+    m->map_cells = MAP_CELLS;
+    m->region.base = MAP_BOX;
+    m->region.cells = MAP_CELLS;
+    m->region.perms = IC_REGION_R | IC_REGION_W;
+    m->swarm = MON_DATA;
+    m->soff = MON_SOFF;
+    m->ssiz = MON_SSIZES;
+    m->swarm_n = MON_CONFN;
+    m->screen_verd = MON_SCREEN_VERD;
+    m->screen_insns = MON_SCREEN_INSNS;
+    m->mav_verd = MON_VERDICTS;
+    m->mav_insns = MON_INSNS;
+    m->mav_fault = MON_PROG_FAULT;
+    m->nverd = MON_NATIVE_VERD;
+    m->diag = DIAG_RUNS;
+    m->prog = MON_PROG;
+    m->prog_cnt = MON_PROG_CNT;
+    a->abi = IC_UNIT_ABI;
+    a->own = ATK_OWN;
+    a->proof = ATK_PROOF;
+    a->mon_results = MON_BOX + 0x200u;
+    a->mon_input = MON_BOX + 0x80u;
+    a->mon_flash = MON_TEXT;
+    a->sp_poison = (uint32_t)(STATUS + 76u);
+}
 
 /* the spec of native slot k, straight from the map */
 static void nat_spec(uint32_t k, ic_compartment_spec *s) {
@@ -138,8 +179,10 @@ static uint32_t boot_gate(void) {
     }
     /* the screening policy must verify against the VRT-backed map region:
      * helper permissions and the region bound are part of the boot gate */
-    if (ic_program_check_region(POLICY_CONFLICT, POLICY_CONFLICT_CNT,
-                                IC_MAP_REGION()) != IC_OK) return 13u;
+    if (ic_program_check_ctx(POLICY_CONFLICT, POLICY_CONFLICT_CNT,
+                             21u, IC_MAP_REGION()) != IC_OK) return 13u;
+    if (ic_program_check_ctx(POLICY_MAVLINK, POLICY_MAVLINK_CNT,
+                             21u, 0) != IC_OK) return 14u;
     return 0u;
 }
 
@@ -182,7 +225,7 @@ static void load_program(void) {
             slot[i] = v;
         }
     }
-    if (ic_program_check((const uint64_t *)MON_PROG, cnt) != IC_OK) {
+    if (ic_program_check_ctx((const uint64_t *)MON_PROG, cnt, 21u, 0) != IC_OK) {
         STATUS[S_LOAD] = 4u;
         return;
     }
@@ -328,6 +371,7 @@ void boot_main(void) {
         }
     }
 
+    unit_ctx_init();
     csr_write(0x305, (uint32_t)trap_entry);
     schedule_round();
 }
@@ -524,7 +568,8 @@ void hot_swap(void) {
         d.sram_base = 0u; d.sram_size = 0u;
         d.entry_offset = 0u; d.reserved = 0u;
         if (ic_module_check(&d) != IC_OK ||
-            ic_program_check((const uint64_t *)(PROG_PEND_ADDR + 8u), w0) != IC_OK) {
+            ic_program_check_ctx((const uint64_t *)(PROG_PEND_ADDR + 8u), w0,
+                                 21u, 0) != IC_OK) {
             goto rej;
         }
         MON_PROG_B_CNT[0] = MON_PROG_CNT[0];              /* live -> shadow */
@@ -722,6 +767,12 @@ void hot_round(void) {
  * loudly (gate-style heartbeat, visible in a dump) instead of parking the
  * core silently inside the mechanism's fail-stop */
 static void enter_checked(unsigned i) {
+    if (i == 0u)
+        compartment_set_arg(0u, (uint32_t)_mon_stack_top,
+                            (uint32_t)(MON_BOX + 0x800u));
+    else if (i == 1u)
+        compartment_set_arg(1u, (uint32_t)_atk_stack_top,
+                            (uint32_t)(ATK_BOX + 0x100u));
     if (compartment_evicted(i)) {
         STATUS[S_HALT] = 0x48414C54u;
         STATUS[S_HALTC] = 0xEE00u | i;   /* schedule bug, not a victim */

@@ -58,6 +58,7 @@ static uint32_t native_verdict(const uint8_t *p) {
 
 static uint32_t ebpf_verdict(const uint8_t *p, uint32_t size) {
     struct ebpf_prog prog;
+    prog.region = 0;
     struct ebpf_result r;
     prog.ins = POLICY_MAVLINK;
     prog.insn_cnt = POLICY_MAVLINK_CNT;
@@ -120,6 +121,7 @@ int main(void) {
         memset(pkt, 0, sizeof pkt);
         pkt[0] = 0xFDu;
         struct ebpf_prog prog;
+    prog.region = 0;
         struct ebpf_result r;
         prog.ins = POLICY_MAVLINK;
         prog.insn_cnt = POLICY_MAVLINK_CNT;
